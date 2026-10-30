@@ -5,7 +5,7 @@ import (
 	"encoding/binary"
 	mathRand "math/rand/v2"
 
-	"github.com/alaingilbert/cron/internal/mtx"
+	"github.com/codeyu/cronv5/internal/mtx"
 )
 
 var RandSrc mtx.Mtx[*mathRand.Rand]

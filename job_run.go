@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/alaingilbert/cron/internal/mtx"
+	"github.com/codeyu/cronv5/internal/mtx"
 	"github.com/jonboulle/clockwork"
 )
 

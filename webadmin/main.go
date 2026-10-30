@@ -9,8 +9,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/alaingilbert/cron"
-	"github.com/alaingilbert/cron/internal/utils"
+	"github.com/codeyu/cronv5"
+	"github.com/codeyu/cronv5/internal/utils"
 )
 
 //go:embed templates/*

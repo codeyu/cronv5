@@ -1,4 +1,4 @@
-module github.com/alaingilbert/cron
+module github.com/codeyu/cronv5
 
 go 1.23
 
