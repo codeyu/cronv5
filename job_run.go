@@ -3,6 +3,7 @@ package cron
 import (
 	"bytes"
 	"context"
+	"slices"
 	"sync"
 	"time"
 
@@ -38,10 +39,30 @@ type jobRunStruct struct {
 	clock     clockwork.Clock
 	inner     mtx.RWMtx[jobRunInner]
 	createdAt time.Time
-	ctx       context.Context
+	cronCtx   context.Context // Context of the cron when the run was created
+	ctx       context.Context // Context of the run, cancelled when the job completes
 	cancel    context.CancelFunc
-	logsBuf   bytes.Buffer
+	logsBuf   *syncBuffer
 	logger    Logger
+}
+
+// syncBuffer is a bytes.Buffer safe for concurrent use,
+// the job writes its logs while they can be read by anyone inspecting the run.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
 }
 
 type jobRunInner struct {
@@ -52,39 +73,21 @@ type jobRunInner struct {
 	panic       bool
 }
 
-var jobRunPool = sync.Pool{
-	New: func() any {
-		return &jobRunStruct{
-			inner: mtx.NewRWMtx(jobRunInner{
-				events: make([]JobEvent, 0, 3), // Pre-allocate event slice
-			}),
-		}
-	},
-}
-
-func acquireJobRun(ctx context.Context, clock clockwork.Clock, entry Entry, idFactory IDFactory, loggerFactory JobRunLoggerFactory) *jobRunStruct {
-	jr := jobRunPool.Get().(*jobRunStruct)
+func newJobRun(ctx context.Context, clock clockwork.Clock, entry Entry, idFactory IDFactory, loggerFactory JobRunLoggerFactory) *jobRunStruct {
+	jr := &jobRunStruct{
+		runID:     RunID(idFactory.Next()),
+		entry:     entry,
+		clock:     clock,
+		createdAt: clock.Now(),
+		cronCtx:   ctx,
+		logsBuf:   &syncBuffer{},
+		inner: mtx.NewRWMtx(jobRunInner{
+			events: make([]JobEvent, 0, 3), // Pre-allocate event slice
+		}),
+	}
 	jr.ctx, jr.cancel = context.WithCancel(ctx)
-	jr.clock = clock
-	jr.entry = entry
-	jr.runID = RunID(idFactory.Next())
-	jr.createdAt = clock.Now()
-	jr.logsBuf = bytes.Buffer{}
-	jr.logger = loggerFactory.New(&jr.logsBuf)
-	jr.inner.With(func(inner *jobRunInner) {
-		inner.events = inner.events[:0] // Reset slice
-		inner.startedAt = nil
-		inner.completedAt = nil
-		inner.error = nil
-		inner.panic = false
-	})
+	jr.logger = loggerFactory.New(jr.logsBuf)
 	return jr
-}
-
-func releaseJobRun(jr *jobRunStruct) {
-	jr.cancel() // Ensure context is cleaned up
-	jr.logsBuf = bytes.Buffer{}
-	jobRunPool.Put(jr)
 }
 
 func (j *jobRunInner) addEvent(evt JobEvent) {
@@ -92,7 +95,11 @@ func (j *jobRunInner) addEvent(evt JobEvent) {
 }
 
 func (j *jobRunStruct) export() JobRun {
-	innerCopy := j.inner.Get()
+	var innerCopy jobRunInner
+	j.inner.RWith(func(inner jobRunInner) {
+		innerCopy = inner
+		innerCopy.events = slices.Clone(inner.events) // Snapshot must not share memory with the run
+	})
 	return JobRun{
 		RunID:       j.runID,
 		Entry:       j.entry,

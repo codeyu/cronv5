@@ -1306,7 +1306,7 @@ func NewEventListener(c *Cron, id EntryID) *EventListener {
 		for {
 			var payload pubsub.Payload[EntryID, JobEvent]
 			select {
-			case <-c.ctx.Done():
+			case <-c.ctx().Done():
 				return
 			case payload = <-sub.ReceiveCh():
 			}
@@ -1330,7 +1330,7 @@ func NewEventListener(c *Cron, id EntryID) *EventListener {
 	}()
 	select {
 	case <-c1:
-	case <-c.ctx.Done():
+	case <-c.ctx().Done():
 	}
 	return l
 }

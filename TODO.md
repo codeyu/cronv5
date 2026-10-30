@@ -6,75 +6,75 @@
 
 ---
 
-## P0 — 已确认的 Bug（建议优先修复）
+## P0 — 已确认的 Bug（✔ 已全部修复，回归测试见 `regression_test.go`、`webadmin/main_test.go`）
 
-- [ ] **B1 `Once()` / `N()` 在执行前就把自己的 ctx 取消了** ✅
+- [x] **B1 `Once()` / `N()` 在执行前就把自己的 ctx 取消了** ✅
   `job.go:533` `Once` 先调用 `c.Remove(id)`，而 `removeEntry`（`cron.go:961`）会 cancel 该 entry 所有正在运行的 run —— 包括当前这次。
   复现：`Once(func(ctx){ ctx.Err() })` 得到 `context canceled`。任何使用 ctx 的 job（HTTP、DB）会立即失败。`NWrapper` 最后一次执行同理。
   修复方向：内部提供“移除 entry 但不取消当前 run”的路径（如 `removeEntry(id, cancelRunning bool)`），或在 job 结束后再移除。（rc#472、rc#317）
 
-- [ ] **B2 `Wait()` 在未启动/已停止的 cron 上永久阻塞** ✅
+- [x] **B2 `Wait()` 在未启动/已停止的 cron 上永久阻塞** ✅
   `stop()`（`cron.go:593`）未运行时返回 `nil` channel，`wait()` 中 `<-nil` 永远阻塞。
   修复：未运行时返回已关闭的 channel；`Wait()` 仍应等待残留的运行中 job。
 
-- [ ] **B3 `Stop()` 之后无法再次 `Start()`** ✅
+- [x] **B3 `Stop()` 之后无法再次 `Start()`** ✅
   `c.ctx` 在 `Build()` 中只创建一次，`Stop()` 调用 `c.cancel()` 后 `run()` 会立即退出，cleanup 线程也随之永久停止。robfig 是支持 Stop→Start 的。
   修复：每次 `Start` 时基于 parent ctx 重新派生 run ctx（并重启 cleanup 线程）。
 
-- [ ] **B4 同步 Hook（`HookSync`）内调用 Hook API 会死锁** ✅
+- [x] **B4 同步 Hook（`HookSync`）内调用 Hook API 会死锁** ✅
   `triggerHooks`（`cron.go:1152`）持有 `hooks` 读锁时调用 hook；hook 内调用 `RemoveHook/OnEvt/DisableHook` 要写锁 → 死锁（且阻塞 job goroutine）。
   修复：读锁内复制出待执行 hook 列表，释放锁后再调用。
 
-- [ ] **B5 `hooksFor` 的 `append` 别名写入，导致 hook 串到别的 entry / 数据竞争** ✅
+- [x] **B5 `hooksFor` 的 `append` 别名写入，导致 hook 串到别的 entry / 数据竞争** ✅
   `cron.go:64` `append(c.globalHooksMap[evt], entryHooks...)` 当全局切片有剩余容量时（`slices.Delete` 后很常见）会写入共享底层数组；并发 job 在 **读锁** 下同时写 → data race，entry A 可能执行 entry B 的 hook。
   修复：`slices.Concat` 或新建切片。
 
-- [ ] **B6 Job 运行日志存在数据竞争** ✅（`go test -race` 报告）
+- [x] **B6 Job 运行日志存在数据竞争** ✅（`go test -race` 报告）
   job 通过 `JobRun.Logger()` 写 `logsBuf`（`bytes.Buffer`，无锁），同时 `export()`（`job_run.go:96`，webadmin / `RunningJobsFor` / hooks）读取 `logsBuf.String()`。
   修复：给日志 buffer 加锁的 writer（同时支持容量上限，见 P1）。
 
-- [ ] **B7 `sync.Pool` 复用 `jobRunStruct` 不安全** 🔍
+- [x] **B7 `sync.Pool` 复用 `jobRunStruct` 不安全** 🔍
   `job_run.go:56`：
   - `export()` 返回的 `Events` 与内部切片共享底层数组，run 被回收复用后 `events[:0]` + append 会改写旧快照（hooks 异步、用户保存的 `JobRun`）。
   - 旧 `JobRun.Logger()` 仍指向被复用对象的 buffer，会写到别的 run 的日志里。
   修复：移除 pool（job 运行频率下收益可忽略），`export()` 时 `slices.Clone(events)`。
 
-- [ ] **B8 `WithRetry` 吞掉错误、忽略取消** 🔍
+- [x] **B8 `WithRetry` 吞掉错误、忽略取消** 🔍
   `job.go:697`：
   - 始终 `return nil`，最终失败不会触发 `JobErr` 事件/hook。
   - ctx 取消后仍 `continue` 继续重试。
   - 最后一次失败后还会多 sleep 一次。
   修复：返回最后一次错误；ctx 取消立即返回 `ctx.Err()`；最后一次不等待。（另见 F7 指数退避，rc#560）
 
-- [ ] **B9 `ThresholdClbAsync` 结果随机（漏报 + 误报）** 🔍
+- [x] **B9 `ThresholdClbAsync` 结果随机（漏报 + 误报）** 🔍
   `job.go:563`：`clock.After(threshold)` 与 `ctx2`（同一时长的 timeout）同时到期，`select` 随机选择 → 慢任务有约 50% 概率不回调；当 `keepCompletedRunsDur > 0` 时 run ctx 在 job 结束后不会被 cancel，**已经按时完成的 job** 也会约 50% 概率误报。
   修复：job 完成时关闭 done channel，`select { case <-done: case <-timer: clb() }`。
 
-- [ ] **B10 Job 结束后其 ctx 不被 cancel（资源泄漏）** 🔍
+- [x] **B10 Job 结束后其 ctx 不被 cancel（资源泄漏）** 🔍
   run ctx 只在 `releaseJobRun` 时 cancel；开启 `keepCompletedRunsDur` 时会一直挂到被清理，所有派生自它的 goroutine/timer 都不会释放。
   修复：`runWithRecovery` 结束即 `cancel()`。
 
-- [ ] **B11 `Start()` 前添加的任务，在 Start 时会立即“补跑”一次** ✅
+- [x] **B11 `Start()` 前添加的任务，在 Start 时会立即“补跑”一次** ✅
   `schedule()`（`cron.go:775`）在 Add 时计算 `Next`，`run()` 启动时不重新计算。Add 后过一段时间才 Start，所有过期 entry 会立即执行。robfig 在 Start 时会以当前时间重算 `Next`。
   修复：`run()` 开始时对所有 active entry 重算 `Next`（`RunOnStart`/`WithNext` 显式指定的保持不变）。
 
-- [ ] **B12 `Entry.Job()` 反射“解包”逻辑错误** ✅
+- [x] **B12 `Entry.Job()` 反射“解包”逻辑错误** ✅
   `entry.go:30`：任何“单字段 struct”都会被当作内部 wrapper 解包。用户 `type MyJob struct{ Name string }` 调用 `Entry.Job()` 返回的是 `"x"`（字符串）而不是 `MyJob`。
   修复：只对内部 `JobNWrapper` 类型解包（类型断言/私有接口 `unwrap() any`）。
 
-- [ ] **B13 删除正在运行的 entry 会泄漏 `runningJobsMap` 项** ✅
+- [x] **B13 删除正在运行的 entry 会泄漏 `runningJobsMap` 项** ✅
   `removeEntry` 先 `Delete(id)`，运行中的 job 结束时 `updateJobRuns` 又 `LoadOrStore` 出一个空项，且该 run 永不释放。
   修复：完成路径用 `Load` 而非 `LoadOrStore`；或延迟到 running 为空时再删除。另外 `removeEntry` 未清理 `entryHooksMap[id]`，hook 也会泄漏。
 
-- [ ] **B14 `addEntry` 的重复 ID 检查存在 TOCTOU 竞态** 🔍
+- [x] **B14 `addEntry` 的重复 ID 检查存在 TOCTOU 竞态** 🔍
   `cron.go:796` 先 `entryExists`（读锁）再写锁插入；并发 `AddJob(WithID(x))` 可能都成功，后者覆盖 map 但 heap `Push` 被忽略 → map 与 heap 不一致。
   修复：在同一把写锁内检查 + 插入；并校验 `job`/`Schedule` 非 nil。
 
-- [ ] **B15 webadmin 存储型 XSS** 🔍
+- [x] **B15 webadmin 存储型 XSS** 🔍
   `webadmin/templates/run.gohtml:13`：`{{ .JobRun.Logs | Nl2br | Safe }}` 把 job 日志原样作为 HTML 输出。日志中含外部数据（URL、错误信息）即可注入脚本。
   修复：先 `html.EscapeString` 再换行，或用 CSS `white-space: pre-wrap` 去掉 `Safe`。另：POST 接口无 CSRF 防护。
 
-- [ ] **B16 `SetCleanupInterval` 可能启动多个清理线程** 🔍
+- [x] **B16 `SetCleanupInterval` 可能启动多个清理线程** 🔍
   `cron.go:566`：设为 0 后旧线程要等下一轮才退出，此时再设为非 0 会起第二个线程。用单一常驻线程 + 通知 channel 替代。
 
 ## P1 — 行为/文档不一致、健壮性

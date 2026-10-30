@@ -5,6 +5,7 @@ import (
 	"embed"
 	"html/template"
 	"net/http"
+	"net/url"
 	"slices"
 	"strings"
 	"time"
@@ -37,8 +38,12 @@ func GetMux(c *cron.Cron) *http.ServeMux {
 var funcsMap = template.FuncMap{
 	"FmtDate":  func(t time.Time) string { return t.Format(time.DateTime) },
 	"ShortDur": func(t time.Time) string { return utils.ShortDur(t) },
-	"Nl2br":    func(v string) string { return strings.ReplaceAll(v, "\n", "<br />") },
-	"Safe":     func(v string) template.HTML { return template.HTML(v) },
+	"Nl2br":    nl2br,
+}
+
+// nl2br escapes the string and replaces new lines with <br />
+func nl2br(v string) template.HTML {
+	return template.HTML(strings.ReplaceAll(template.HTMLEscapeString(v), "\n", "<br />"))
 }
 
 func redirectTo(w http.ResponseWriter, l string) error {
@@ -73,9 +78,26 @@ func render(code int, name string, data any, w http.ResponseWriter) error {
 type M func(w http.ResponseWriter, r *http.Request) error
 
 func (m M) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost && isCrossOrigin(r) {
+		http.Error(w, "cross-origin request rejected", http.StatusForbidden)
+		return
+	}
 	if err := (m)(w, r); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+// isCrossOrigin reports whether the request was sent by another site (CSRF protection).
+// Requests without Sec-Fetch-Site nor Origin headers (non-browser clients) are allowed.
+func isCrossOrigin(r *http.Request) bool {
+	if site := r.Header.Get("Sec-Fetch-Site"); site != "" {
+		return site != "same-origin" && site != "none"
+	}
+	if origin := r.Header.Get("Origin"); origin != "" {
+		u, err := url.Parse(origin)
+		return err != nil || u.Host != r.Host
+	}
+	return false
 }
 
 type commonData struct {

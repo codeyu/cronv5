@@ -1,7 +1,6 @@
 package cron
 
 import (
-	"reflect"
 	"time"
 )
 
@@ -24,19 +23,19 @@ type Entry struct {
 	Active bool
 	// The Job to run.
 	job Job
+	// Next was explicitly set (RunOnStart, WithNext, RunNow) and must not be recomputed when the cron starts
+	pinnedNext bool
+}
+
+// jobUnwrapper is implemented by the wrappers the library uses to turn an IntoJob into a Job
+type jobUnwrapper interface {
+	unwrapJob() any
 }
 
 // Job returns the original job as it was before it was wrapped by the cron library
 func (e Entry) Job() any {
-	val := reflect.ValueOf(e.job)
-	if val.Kind() == reflect.Ptr {
-		val = val.Elem()
-	}
-	if val.Kind() == reflect.Struct && val.NumField() == 1 {
-		field := val.Field(0)
-		if field.CanInterface() {
-			return field.Interface()
-		}
+	if w, ok := e.job.(jobUnwrapper); ok {
+		return w.unwrapJob()
 	}
 	return e.job
 }
@@ -58,11 +57,13 @@ func WithID(id EntryID) func(*Cron, *Entry) {
 func WithNext(next time.Time) func(*Cron, *Entry) {
 	return func(_ *Cron, entry *Entry) {
 		entry.Next = next
+		entry.pinnedNext = true
 	}
 }
 
 func RunOnStart(c *Cron, entry *Entry) {
 	entry.Next = c.now()
+	entry.pinnedNext = true
 }
 
 func Disabled(_ *Cron, entry *Entry) {
