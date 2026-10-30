@@ -22,7 +22,7 @@ import (
 
 // run one logic cycle
 func cycle(cron *Cron) {
-	cron.entriesUpdated()
+	cron.entriesUpdatedSync()
 }
 
 func advanceAndCycle(cron *Cron, d time.Duration) {

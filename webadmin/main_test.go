@@ -1,6 +1,7 @@
 package webadmin
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -66,5 +67,36 @@ func TestCrossOriginPostRejected(t *testing.T) {
 			GetMux(c).ServeHTTP(rec, newReq(tt.headers))
 			assert.Equal(t, tt.code, rec.Code)
 		})
+	}
+}
+
+func TestCompletedPageLimit(t *testing.T) {
+	c := cron.New().WithKeepCompletedRunsDur(time.Hour).Quiet().Build()
+	c.Start()
+	defer c.Stop()
+	id, _ := c.AddJob("@every 1h", func() {})
+	for i := 0; i < 3; i++ {
+		assert.NoError(t, c.RunNow(id))
+	}
+	assert.Eventually(t, func() bool { return len(c.CompletedJobs()) == 3 }, time.Second, time.Millisecond)
+	get := func(url string) string {
+		rec := httptest.NewRecorder()
+		GetMux(c).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
+		assert.Equal(t, http.StatusOK, rec.Code)
+		return rec.Body.String()
+	}
+	assert.Contains(t, get("/completed/?limit=2"), "Completed jobs (2, latest 2 at most")
+	assert.Contains(t, get("/completed/?limit=0"), "Completed jobs (3)")
+	assert.Contains(t, get("/completed/"), "Completed jobs (3, latest 100 at most")
+}
+
+func TestAllPagesRender(t *testing.T) {
+	c := cron.New().Quiet().Build()
+	_, _ = c.AddJob("@every 1h", func() {}, cron.WithID("entry"))
+	hookID := c.OnJobStart(func(context.Context, *cron.Cron, cron.HookID, cron.JobRun) {})
+	for _, url := range []string{"/", "/completed/", "/entries/entry/", "/hooks/" + string(hookID) + "/"} {
+		rec := httptest.NewRecorder()
+		GetMux(c).ServeHTTP(rec, httptest.NewRequest(http.MethodGet, url, nil))
+		assert.Equal(t, http.StatusOK, rec.Code, url)
 	}
 }

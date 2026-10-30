@@ -3,6 +3,7 @@ package cron
 import (
 	"context"
 	"errors"
+	"io"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -589,4 +590,120 @@ func TestNRequiresPositive(t *testing.T) {
 	assert.Panics(t, func() { N(0, func() {}) })
 	assert.Panics(t, func() { N(-1, func() {}) })
 	assert.NotPanics(t, func() { N(1, func() {}) })
+}
+
+// Tests for the P2 section of TODO.md
+
+// P2/P4: the scheduler does not hold the entries lock while calling user factories,
+// and AddJob does not wait for the scheduler loop.
+func TestAddJobDoesNotWaitForSchedulerLoop(t *testing.T) {
+	factoryCalled := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	loggerFactory := FuncJobRunLoggerFactory(func(w io.Writer) Logger {
+		once.Do(func() {
+			close(factoryCalled)
+			<-release // Block the scheduler loop
+		})
+		return DiscardLogger
+	})
+	cron, clock := newRegressionCron(func(b *Builder) { b.WithJobRunLoggerFactory(loggerFactory) })
+	_, _ = cron.AddJob("* * * * * *", func() {})
+	cron.Start()
+	defer cron.Stop()
+	go clock.Advance(time.Second)
+	<-factoryCalled
+	done := make(chan struct{})
+	go func() {
+		_, _ = cron.AddJob("* * * * * *", func() {})
+		_ = cron.Entries()
+		cron.Disable(cron.Entries()[0].ID)
+		close(done)
+	}()
+	recvWithTimeout(t, done, "AddJob/Entries/Disable should not wait for the scheduler loop")
+	close(release)
+}
+
+func TestRunNowStartsJobBeforeReturning(t *testing.T) {
+	cron, _ := newRegressionCron()
+	cron.Start()
+	defer cron.Stop()
+	release := make(chan struct{})
+	id, _ := cron.AddJob("0 0 0 1 1 *", func() { <-release })
+	assert.NoError(t, cron.RunNow(id))
+	assert.True(t, cron.IsRunning(id))
+	close(release)
+}
+
+// P3: Entries are sorted by next activation time, inactive entries last
+func TestEntriesSorted(t *testing.T) {
+	cron, _ := newRegressionCron()
+	_, _ = cron.Schedule(Every(3*time.Second), J(func() {}), WithID("3s"))
+	_, _ = cron.Schedule(Every(time.Second), J(func() {}), WithID("disabled"), Disabled)
+	_, _ = cron.Schedule(Every(time.Second), J(func() {}), WithID("1s"))
+	_, _ = cron.Schedule(Every(2*time.Second), J(func() {}), WithID("2s"))
+	var ids []EntryID
+	for _, e := range cron.Entries() {
+		ids = append(ids, e.ID)
+	}
+	assert.Equal(t, []EntryID{"1s", "2s", "3s", "disabled"}, ids)
+}
+
+// P5: cleanup frees old runs of every entry
+func TestCleanupOldRunsAllEntries(t *testing.T) {
+	cron, clock := newRegressionCron(func(b *Builder) { b.WithKeepCompletedRunsDur(time.Minute) })
+	cron.Start()
+	defer cron.Stop()
+	for i := 0; i < 50; i++ {
+		_, _ = cron.AddJob("* * * * * *", func() {})
+	}
+	advanceAndCycle(cron, time.Second)
+	assert.Len(t, cron.CompletedJobs(), 50)
+	for _, e := range cron.Entries() {
+		cron.Disable(e.ID) // No new runs while advancing the clock
+	}
+	clock.Advance(2 * time.Minute)
+	cron.cleanupOldRuns(cron.ctx(), time.Minute)
+	assert.Empty(t, cron.CompletedJobs())
+}
+
+// P6: locations are cached
+func TestLoadLocationCached(t *testing.T) {
+	loc1, err := loadLocation("Asia/Tokyo")
+	assert.NoError(t, err)
+	loc2, _ := loadLocation("Asia/Tokyo")
+	assert.Same(t, loc1, loc2)
+	_, err = loadLocation("Invalid/Zone")
+	assert.Error(t, err)
+}
+
+// P7: logs string is cached until the next write
+func TestSyncBufferStringCached(t *testing.T) {
+	buf := &syncBuffer{}
+	_, _ = buf.Write([]byte("a"))
+	assert.Equal(t, "a", buf.String())
+	assert.Equal(t, "a", buf.String())
+	_, _ = buf.Write([]byte("b"))
+	assert.Equal(t, "ab", buf.String())
+	assert.Equal(t, 0.0, testing.AllocsPerRun(10, func() { _ = buf.String() }))
+}
+
+func TestRecentCompletedJobs(t *testing.T) {
+	cron, _ := newRegressionCron(func(b *Builder) { b.WithKeepCompletedRunsDur(time.Hour) })
+	cron.Start()
+	defer cron.Stop()
+	_, _ = cron.AddJob("* * * * * *", func() {}, WithID("a"))
+	_, _ = cron.AddJob("*/2 * * * * *", func() {}, WithID("b"))
+	for i := 0; i < 4; i++ {
+		advanceAndCycle(cron, time.Second)
+	}
+	all := cron.CompletedJobs() // Oldest first
+	assert.Len(t, all, 6)
+	recent := cron.RecentCompletedJobs(3) // Newest first
+	assert.Len(t, recent, 3)
+	for i := 1; i < len(recent); i++ {
+		assert.False(t, recent[i].CreatedAt.After(recent[i-1].CreatedAt))
+	}
+	assert.Equal(t, all[len(all)-1].CreatedAt, recent[0].CreatedAt)
+	assert.Len(t, cron.RecentCompletedJobs(0), 6)
 }

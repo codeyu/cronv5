@@ -54,6 +54,7 @@ type syncBuffer struct {
 	buf       bytes.Buffer
 	max       int
 	truncated bool
+	str       *string // Cached result of String(), reset on Write
 }
 
 const logsTruncatedMsg = "[logs truncated]\n"
@@ -62,6 +63,7 @@ func (b *syncBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 	_, _ = b.buf.Write(p)
+	b.str = nil
 	if b.max > 0 && b.buf.Len() > b.max {
 		b.buf.Next(b.buf.Len() - b.max) // Discard the oldest logs
 		b.truncated = true
@@ -72,10 +74,14 @@ func (b *syncBuffer) Write(p []byte) (int, error) {
 func (b *syncBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	if b.truncated {
-		return logsTruncatedMsg + b.buf.String()
+	if b.str == nil { // Logs of a completed job are exported many times without being copied again
+		s := b.buf.String()
+		if b.truncated {
+			s = logsTruncatedMsg + s
+		}
+		b.str = &s
 	}
-	return b.buf.String()
+	return *b.str
 }
 
 type jobRunInner struct {

@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"slices"
 	"time"
 )
 
@@ -52,24 +53,30 @@ func newEntryHeap() *entryHeap {
 	}
 }
 
-func (h *entryHeap) Clone() *entryHeap {
-	newHeap := newEntryHeap()
-	newHeap.entries = make([]*Entry, len(h.entries))
-	copy(newHeap.entries, h.entries)
-	newHeap.index = make(map[EntryID]int)
-	for k, v := range h.index {
-		newHeap.index[k] = v
-	}
-	return newHeap
-}
-
+// Entries returns a copy of the entries, sorted by next activation time
 func (h *entryHeap) Entries() []Entry {
-	clone := h.Clone()
-	out := make([]Entry, 0, clone.Len())
-	for clone.Len() > 0 {
-		out = append(out, *clone.Pop())
+	sorted := slices.Clone(h.entries)
+	slices.SortFunc(sorted, compareEntries)
+	out := make([]Entry, len(sorted))
+	for i, entry := range sorted {
+		out[i] = *entry
 	}
 	return out
+}
+
+// compareEntries orders the entries like the heap does: active entries by next activation time,
+// then the inactive entries and the ones that will never run.
+func compareEntries(a, b *Entry) int {
+	aLast, bLast := a.Next.IsZero() || !a.Active, b.Next.IsZero() || !b.Active
+	switch {
+	case aLast && bLast:
+		return 0
+	case aLast:
+		return 1
+	case bLast:
+		return -1
+	}
+	return a.Next.Compare(b.Next)
 }
 
 // Less function compares two entries considering zero times
@@ -114,6 +121,13 @@ func (h *entryHeap) Pop() *Entry {
 	h.entries = h.entries[:n]
 	delete(h.index, entry.ID)
 	return entry
+}
+
+// Fix re-establishes the heap ordering after the entry at index i has changed its Next value
+func (h *entryHeap) Fix(i int) {
+	if !h.down(i, h.Len()) {
+		h.up(i)
+	}
 }
 
 func (h *entryHeap) Update(id EntryID, newNext time.Time) error {

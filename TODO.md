@@ -91,17 +91,30 @@
 - [x] **R10 CI**：`.travis.yml` 已过时，换成 GitHub Actions（`go vet`、`go test -race`、多 Go 版本）。
 - [x] **R11 `NWrapper(n<=0)`** 永远不会移除，需参数校验。
 
-## P2 — 性能优化
+## P2 — 性能优化（✔ 已完成，benchmark 见 `bench_test.go`）
 
-- [ ] **P1 调度循环每轮 `clock.After` 新建 timer**：改为复用单个 `Timer` + `Reset`，减少分配（fake clock 下还会累积 waiter）。
-- [ ] **P2 每次 Add/Remove/Update 都与调度 goroutine 同步握手**（`entriesUpdated` 阻塞到 `runDueEntries` 完成），批量添加 N 个任务需 N 次往返。改为非阻塞通知（带缓冲 chan, len 1），或提供批量 API。
-- [ ] **P3 `Entries()` 每次 Clone + 全量 Pop（O(n log n) + 两次分配）**：直接复制切片后 `slices.SortFunc` 一次即可。
-- [ ] **P4 `runDueEntries` 在 entries 写锁内调用用户代码**（`IDFactory`、`JobRunLoggerFactory`）：先收集到期 entry，释放锁后再创建 run。
-- [ ] **P5 cleanup 每次启动 `NumCPU` 个 goroutine**：数据量小，单线程循环即可。
-- [ ] **P6 `Parse` 每次调用 `time.LoadLocation`**（读 tzdata 文件）：加缓存。
-- [ ] **P7 `CompletedJobs()` 每次导出全部历史（含日志字符串复制）**：提供分页/limit 版本，webadmin 使用分页。
-- [ ] **P8 webadmin 每个请求重新解析模板**：启动时解析一次。
-- [ ] **P9 增加 benchmark**（Add 1w 任务、调度循环、Parse、Next），优化前后对比。
+- [x] **P1 调度循环每轮 `clock.After` 新建 timer**：改为复用单个 `Timer` + `Reset`，减少分配（fake clock 下还会累积 waiter）。
+- [x] **P2 每次 Add/Remove/Update 都与调度 goroutine 同步握手**（`entriesUpdated` 阻塞到 `runDueEntries` 完成），批量添加 N 个任务需 N 次往返。改为非阻塞通知（带缓冲 chan, len 1），或提供批量 API。
+- [x] **P3 `Entries()` 每次 Clone + 全量 Pop（O(n log n) + 两次分配）**：直接复制切片后 `slices.SortFunc` 一次即可。
+- [x] **P4 `runDueEntries` 在 entries 写锁内调用用户代码**（`IDFactory`、`JobRunLoggerFactory`）：先收集到期 entry，释放锁后再创建 run。
+- [x] **P5 cleanup 每次启动 `NumCPU` 个 goroutine**：数据量小，单线程循环即可。
+- [x] **P6 `Parse` 每次调用 `time.LoadLocation`**（读 tzdata 文件）：加缓存。
+- [x] **P7 `CompletedJobs()` 每次导出全部历史（含日志字符串复制）**：提供分页/limit 版本，webadmin 使用分页。
+- [x] **P8 webadmin 每个请求重新解析模板**：启动时解析一次。
+- [x] **P9 增加 benchmark**（Add 1w 任务、调度循环、Parse、Next），优化前后对比。
+
+优化前后对比（4 核，`go test -bench . -benchmem`，取 3 次中位数）：
+
+| Benchmark | 优化前 | 优化后 | 提升 |
+|---|---|---|---|
+| UpdateSchedule（运行中，1 万 entry） | 140 µs | 0.22 µs | 630× |
+| RunNow（运行中） | 121 µs | 8.9 µs | 13.6× |
+| CleanupOldRuns（1000 entry） | 864 µs | 64 µs | 13.4× |
+| Entries（1 万 entry） | 12.7 ms | 1.3 ms | 9.7× |
+| AddJob（运行中） | 106 µs | 18.8 µs | 5.7× |
+| Parse（带 CRON_TZ） | 5.5 µs | 1.2 µs | 4.5× |
+| CompletedJobs（1000 runs） | 2.5 ms / 2512 allocs | 2.1 ms / 1512 allocs | 1.2× |
+| Dispatch（一次触发 1000 个 job） | 8.6 ms / 34 allocs/job | 8.4 ms / 30 allocs/job | ≈1× |
 
 ## P3 — 新功能（来自 robfig/cron 社区需求）
 

@@ -7,7 +7,6 @@ import (
 	"io"
 	"iter"
 	"log/slog"
-	"runtime"
 	"runtime/debug"
 	"slices"
 	"sort"
@@ -34,7 +33,8 @@ type Cron struct {
 	parentCtx            context.Context                              // Parent context provided by the user
 	lifecycle            atomic.Pointer[lifecycle]                    // Context of the current run (renewed when restarting after a Stop)
 	lifecycleMu          sync.Mutex                                   // Serializes start/stop transitions
-	update               chan context.CancelFunc                      // Triggers update in the scheduler loop
+	update               chan context.CancelFunc                      // Triggers update in the scheduler loop, and wait for it to be processed
+	notify               chan struct{}                                // Triggers update in the scheduler loop, without waiting
 	running              atomic.Bool                                  // Indicates if the scheduler is currently running
 	location             atomic.Pointer[time.Location]                // Thread-safe time zone location
 	logger               Logger                                       // Logger for scheduler events, errors, and diagnostics
@@ -348,6 +348,7 @@ func (b *Builder) Build() *Cron {
 		parentCtx:            parentCtx,
 		runningJobsMap:       isync.Map[EntryID, *mtx.RWMtx[jobRunsInner]]{},
 		update:               make(chan context.CancelFunc),
+		notify:               make(chan struct{}, 1),
 		logger:               logger,
 		parser:               parser,
 		idFactory:            idFactory,
@@ -530,6 +531,11 @@ func (c *Cron) RunningJobs() []JobRun { return c.runningJobs() }
 // CompletedJobs returns a list of all completed job runs across all entries
 func (c *Cron) CompletedJobs() []JobRun { return c.completedJobs() }
 
+// RecentCompletedJobs returns the "limit" most recent completed job runs across all entries, newest first.
+// Only the returned runs are exported, which is cheaper than CompletedJobs when many runs are kept.
+// A limit <= 0 returns all the completed job runs.
+func (c *Cron) RecentCompletedJobs(limit int) []JobRun { return c.recentCompletedJobs(limit) }
+
 // RunningJobsFor returns all currently running jobs for a specific entry
 // // Returns ErrEntryNotFound if the entry doesn't exist.
 func (c *Cron) RunningJobsFor(entryID EntryID) ([]JobRun, error) {
@@ -610,23 +616,25 @@ func (c *Cron) cleanupLoop(ctx context.Context) {
 }
 
 func (c *Cron) cleanupOldRuns(ctx context.Context, keepCompletedRunsDur time.Duration) {
-	var totalCleaned atomic.Int32
+	var totalCleaned int
 	start := c.clock.Now()
 	thresholdTime := start.Add(-keepCompletedRunsDur)
-	workerCount := runtime.NumCPU()
-	utils.ParallelForEach(ctx, c.runningJobsMap.IterValues(), workerCount, func(v *mtx.RWMtx[jobRunsInner]) {
+	for v := range c.runningJobsMap.IterValues() {
+		if ctx.Err() != nil {
+			return
+		}
 		v.With(func(inner *jobRunsInner) {
 			idx := sort.Search(len(inner.completedTS), func(i int) bool {
 				return inner.completedTS[i].After(thresholdTime)
 			})
 			if idx > 0 {
 				freeOldestCompletedRuns(inner, idx)
-				totalCleaned.Add(int32(idx))
+				totalCleaned += idx
 			}
 		})
-	})
-	if count := totalCleaned.Load(); count > 0 {
-		c.logger.Debug("cleaned old runs", "count", count, "workers", workerCount, "duration", c.clock.Since(start))
+	}
+	if totalCleaned > 0 {
+		c.logger.Debug("cleaned old runs", "count", totalCleaned, "duration", c.clock.Since(start))
 	}
 	c.lastCleanupTS.Set(c.clock.Now())
 }
@@ -967,7 +975,11 @@ func (c *Cron) modifyEntry(id EntryID, updateFunc func(entry *Entry) bool) error
 	}); err != nil {
 		return err
 	}
-	c.entriesUpdated() // modifyEntry
+	if updateFunc == nil {
+		c.entriesUpdatedSync() // RunNow: the job is started when RunNow returns
+	} else {
+		c.entriesUpdated() // modifyEntry
+	}
 	return nil
 }
 
@@ -1022,10 +1034,13 @@ func (c *Cron) getNextDelay() (out time.Duration) {
 
 func (c *Cron) run() {
 	ctx := c.ctx()
+	timer := c.clock.NewTimer(c.getNextDelay()) // A single timer, reset at every iteration
+	defer timer.Stop()
 	for {
 		var updated context.CancelFunc
 		select {
-		case <-c.clock.After(c.getNextDelay()):
+		case <-timer.Chan():
+		case <-c.notify:
 		case updated = <-c.update:
 		case <-ctx.Done():
 			return
@@ -1034,11 +1049,31 @@ func (c *Cron) run() {
 		if updated != nil {
 			updated()
 		}
+		resetTimer(timer, c.getNextDelay())
 	}
 }
 
-// trigger an update of the entries in the run loop
+// resetTimer stops the timer, drains its channel if it already fired, and resets it
+func resetTimer(timer clockwork.Timer, d time.Duration) {
+	if !timer.Stop() {
+		select {
+		case <-timer.Chan():
+		default:
+		}
+	}
+	timer.Reset(d)
+}
+
+// entriesUpdated notifies the scheduler loop that the entries changed, without waiting for it
 func (c *Cron) entriesUpdated() {
+	if c.isRunning() { // If the cron is not running, no need to notify the main loop about updating entries
+		utils.NonBlockingSend(c.notify, struct{}{}) // A pending notification is enough
+	}
+}
+
+// entriesUpdatedSync notifies the scheduler loop that the entries changed,
+// and waits until the due entries have been started.
+func (c *Cron) entriesUpdatedSync() {
 	if c.isRunning() { // If the cron is not running, no need to notify the main loop about updating entries
 		ctx, cancel := context.WithCancel(c.ctx())
 		select { // Wait until the main loop pickup our update task (or cron exiting)
@@ -1051,23 +1086,47 @@ func (c *Cron) entriesUpdated() {
 
 // Run every entry whose next time was less than now
 func (c *Cron) runDueEntries() {
-	if c.isRunning() {
-		now := c.now()
-		c.entries.With(func(entries *entries) {
-			for {
-				entry := entries.heap.Peek()
-				if entry == nil || entry.Next.After(now) || entry.Next.IsZero() || !entry.Active {
-					break
-				}
-				entry = entries.heap.Pop()
-				entry.Prev = entry.Next
-				entry.Next = entry.Schedule.Next(now)
-				entry.pinnedNext = false
-				entries.heap.Push(entry)
-				c.startJob(*entry)
-			}
-		})
+	if !c.isRunning() {
+		return
 	}
+	now := c.now()
+	type dueEntry struct {
+		ptr      *Entry // To check that the entry was not removed/replaced in the meantime
+		snapshot Entry
+	}
+	var due []dueEntry
+	c.entries.With(func(entries *entries) {
+		for {
+			entry := entries.heap.Peek()
+			if entry == nil || entry.Next.After(now) || entry.Next.IsZero() || !entry.Active {
+				break
+			}
+			entry.Prev = entry.Next
+			entry.Next = entry.Schedule.Next(now)
+			entry.pinnedNext = false
+			entries.heap.Fix(0)
+			due = append(due, dueEntry{entry, *entry})
+		}
+	})
+	if len(due) == 0 {
+		return
+	}
+	// Create the job runs without holding the lock, the factories are user code
+	jobsCtx := c.lifecycle.Load().jobsCtx
+	runs := make([]*jobRunStruct, len(due))
+	for i, d := range due {
+		runs[i] = newJobRun(jobsCtx, c.clock, d.snapshot, c.idFactory, c.jobRunLoggerFactory, c.maxLogSize)
+	}
+	// Start the runs while holding the read lock, so they cannot race with removeEntry
+	c.entries.RWith(func(entries entries) {
+		for i, jobRun := range runs {
+			if entries.entriesMap[jobRun.entry.ID] == due[i].ptr {
+				c.startJob(jobRun)
+			} else {
+				jobRun.cancel()
+			}
+		}
+	})
 }
 
 func (c *Cron) getLocation() *time.Location {
@@ -1209,6 +1268,18 @@ func (c *Cron) completedJobs() (out []JobRun) {
 	return c.jobRunsClb(getCompletedSliceClb)
 }
 
+func (c *Cron) recentCompletedJobs(limit int) []JobRun {
+	var runs []*jobRunStruct
+	for jobRuns := range c.runningJobsMap.IterValues() {
+		jobRuns.RWith(func(v jobRunsInner) { runs = append(runs, v.completed...) }) // Copy the pointers under the lock
+	}
+	slices.SortFunc(runs, func(a, b *jobRunStruct) int { return b.createdAt.Compare(a.createdAt) })
+	if limit > 0 && len(runs) > limit {
+		runs = runs[:limit]
+	}
+	return exportJobRuns(runs)
+}
+
 func (c *Cron) runningJobsFor(entryID EntryID) (out []JobRun, err error) {
 	return c.jobRunsForClb(entryID, getRunningSliceClb)
 }
@@ -1273,14 +1344,14 @@ func freeOldestCompletedRuns(v *jobRunsInner, n int) {
 
 // startJob runs the given job in a new goroutine.
 // Must be called while holding the entries lock.
-func (c *Cron) startJob(entry Entry) {
-	jobRun := newJobRun(c.lifecycle.Load().jobsCtx, c.clock, entry, c.idFactory, c.jobRunLoggerFactory, c.maxLogSize)
+func (c *Cron) startJob(jobRun *jobRunStruct) {
+	entryID := jobRun.entry.ID
 	c.runningJobsCount.Add(1)
-	c.registerJobRun(entry.ID, jobRun)
+	c.registerJobRun(entryID, jobRun)
 	go func() {
 		defer func() {
 			jobRun.cancel() // Release the job context as soon as the job is done
-			c.completeJobRun(entry.ID, jobRun)
+			c.completeJobRun(entryID, jobRun)
 			c.runningJobsCount.Add(-1)
 			c.signalJobCompleted()
 		}()
@@ -1336,20 +1407,24 @@ func makeEventErr(c *Cron, jobRun *jobRunStruct, typ JobEventType, err error) {
 	c.ps.Pub(jobRun.entry.ID, evt)
 	// Hooks receive the cron context, the job context is cancelled as soon as the job completes,
 	// which would break async hooks.
-	triggerHooks(c, jobRun.cronCtx, jobRun.export(), typ)
+	triggerHooks(c, jobRun.cronCtx, jobRun, typ)
 }
 
-func triggerHooks(c *Cron, ctx context.Context, jr JobRun, evtType JobEventType) {
+func triggerHooks(c *Cron, ctx context.Context, jobRun *jobRunStruct, evtType JobEventType) {
 	// Collect the hooks while holding the lock, but run them after releasing it,
 	// so that sync hooks can use the hooks API (RemoveHook, OnEvt...) without deadlocking.
 	var hooks []*hookStruct
 	c.hooks.RWith(func(v hooksContainer) {
-		for _, hook := range v.hooksFor(evtType, jr.Entry.ID) {
+		for _, hook := range v.hooksFor(evtType, jobRun.entry.ID) {
 			if hook.active {
 				hooks = append(hooks, hook)
 			}
 		}
 	})
+	if len(hooks) == 0 {
+		return
+	}
+	jr := jobRun.export() // Only export when needed
 	utils.ForEach(hooks, func(hook *hookStruct) {
 		fn := func() { hook.fn(ctx, c, hook.id, jr) }
 		maybeAsync(fn, hook.runAsync)()
