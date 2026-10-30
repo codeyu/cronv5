@@ -593,20 +593,27 @@ type JobWrapper func(IntoJob) Job
 
 // Once runs a job only one time, the entry is removed when the job starts.
 func Once(job IntoJob) Job {
+	inner := J(job) // Convert once, unsupported types panic when the wrapper is created
 	return FuncJob(func(ctx context.Context, c *Cron, r JobRun) error {
 		c.removeKeepRun(r.Entry.ID, r.RunID) // Do not cancel the current run
-		return J(job).Run(ctx, c, r)
+		return inner.Run(ctx, c, r)
 	})
 }
 
+// NWrapper creates a JobWrapper that runs a job "n" times, then removes the entry.
+// It panics if n <= 0.
 func NWrapper(n int) JobWrapper {
+	if n <= 0 {
+		panic("cron: N requires n > 0")
+	}
 	return func(job IntoJob) Job {
 		var count atomic.Int32
+		inner := J(job)
 		return FuncJob(func(ctx context.Context, c *Cron, r JobRun) error {
 			if newCount := count.Add(1); int(newCount) == n {
 				c.removeKeepRun(r.Entry.ID, r.RunID) // Do not cancel the current run
 			}
-			return J(job).Run(ctx, c, r)
+			return inner.Run(ctx, c, r)
 		})
 	}
 }
@@ -624,6 +631,7 @@ type ThresholdCallbackAsync func(ctx context.Context, c *Cron, r JobRun, thresho
 // The callback is invoked asynchronously and does not block job execution.
 func ThresholdClbAsyncWrapper(threshold time.Duration, clb ThresholdCallbackAsync) JobWrapper {
 	return func(job IntoJob) Job {
+		inner := J(job)
 		return FuncJob(func(ctx context.Context, c *Cron, r JobRun) error {
 			done := make(chan struct{})
 			timer := c.clock.NewTimer(threshold)
@@ -638,7 +646,7 @@ func ThresholdClbAsyncWrapper(threshold time.Duration, clb ThresholdCallbackAsyn
 				case <-done:
 				}
 			}()
-			return J(job).Run(ctx, c, r)
+			return inner.Run(ctx, c, r)
 		})
 	}
 }
@@ -650,9 +658,10 @@ func ThresholdClbAsync(threshold time.Duration, j IntoJob, clb ThresholdCallback
 
 func ThresholdClbWrapper(threshold time.Duration, clb ThresholdCallback) JobWrapper {
 	return func(job IntoJob) Job {
+		inner := J(job)
 		return FuncJob(func(ctx context.Context, c *Cron, r JobRun) error {
 			start := c.clock.Now()
-			err := J(job).Run(ctx, c, r)
+			err := inner.Run(ctx, c, r)
 			dur := c.clock.Since(start)
 			if dur > threshold {
 				clb(ctx, c, r, threshold, dur, err)
@@ -670,10 +679,11 @@ func ThresholdClb(threshold time.Duration, j IntoJob, clb ThresholdCallback) Job
 // SkipIfStillRunning skips an invocation of the Job if a previous invocation is still running.
 func SkipIfStillRunning(j IntoJob) Job {
 	var running atomic.Bool
+	inner := J(j)
 	return FuncJob(func(ctx context.Context, c *Cron, r JobRun) (err error) {
 		if running.CompareAndSwap(false, true) {
 			defer running.Store(false)
-			err = J(j).Run(ctx, c, r)
+			err = inner.Run(ctx, c, r)
 		} else {
 			return ErrJobAlreadyRunning
 		}
@@ -686,6 +696,7 @@ func SkipIfStillRunning(j IntoJob) Job {
 // have the delay logged at Info.
 func DelayIfStillRunning(j IntoJob) Job {
 	var mu sync.Mutex
+	inner := J(j)
 	return FuncJob(func(ctx context.Context, c *Cron, r JobRun) (err error) {
 		start := c.clock.Now()
 		mu.Lock()
@@ -693,13 +704,14 @@ func DelayIfStillRunning(j IntoJob) Job {
 		if dur := c.clock.Since(start); dur > time.Minute {
 			c.logger.Info("delay", "entryID", r.Entry.ID, "runID", r.RunID, "duration", dur)
 		}
-		return J(j).Run(ctx, c, r)
+		return inner.Run(ctx, c, r)
 	})
 }
 
 // JitterWrapper add some random delay before running the job
 func JitterWrapper(duration time.Duration) JobWrapper {
 	return func(j IntoJob) Job {
+		inner := J(j)
 		return FuncJob(func(ctx context.Context, c *Cron, r JobRun) error {
 			delay := utils.RandDuration(0, max(duration, 0))
 			select {
@@ -707,7 +719,7 @@ func JitterWrapper(duration time.Duration) JobWrapper {
 			case <-ctx.Done():
 				return ctx.Err()
 			}
-			return J(j).Run(ctx, c, r)
+			return inner.Run(ctx, c, r)
 		})
 	}
 }
@@ -720,10 +732,11 @@ func WithJitter(duration time.Duration, job IntoJob) Job {
 // TimeoutWrapper automatically cancel the job context after a given duration
 func TimeoutWrapper(duration time.Duration) JobWrapper {
 	return func(j IntoJob) Job {
+		inner := J(j)
 		return FuncJob(func(ctx context.Context, c *Cron, r JobRun) error {
 			timeoutCtx, cancel := clockwork.WithTimeout(ctx, c.clock, duration)
 			defer cancel()
-			return J(j).Run(timeoutCtx, c, r)
+			return inner.Run(timeoutCtx, c, r)
 		})
 	}
 }
@@ -736,10 +749,11 @@ func WithTimeout(d time.Duration, job IntoJob) Job {
 
 func DeadlineWrapper(deadline time.Time) JobWrapper {
 	return func(j IntoJob) Job {
+		inner := J(j)
 		return FuncJob(func(ctx context.Context, c *Cron, r JobRun) error {
 			deadlineCtx, cancel := clockwork.WithDeadline(ctx, c.clock, deadline)
 			defer cancel()
-			return J(j).Run(deadlineCtx, c, r)
+			return inner.Run(deadlineCtx, c, r)
 		})
 	}
 }
@@ -762,9 +776,10 @@ func Chain(j IntoJob, wrappers ...JobWrapper) Job {
 // and returns the error of the last attempt.
 func WithRetryWrapper(maxRetry int) JobWrapper {
 	return func(job IntoJob) Job {
+		inner := J(job)
 		return FuncJob(func(ctx context.Context, c *Cron, r JobRun) error {
 			for i := 0; ; i++ {
-				err := J(job).Run(ctx, c, r)
+				err := inner.Run(ctx, c, r)
 				if err == nil || i >= maxRetry {
 					return err
 				}

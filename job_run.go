@@ -48,20 +48,33 @@ type jobRunStruct struct {
 
 // syncBuffer is a bytes.Buffer safe for concurrent use,
 // the job writes its logs while they can be read by anyone inspecting the run.
+// When "max" is set, only the last "max" bytes are kept.
 type syncBuffer struct {
-	mu  sync.Mutex
-	buf bytes.Buffer
+	mu        sync.Mutex
+	buf       bytes.Buffer
+	max       int
+	truncated bool
 }
+
+const logsTruncatedMsg = "[logs truncated]\n"
 
 func (b *syncBuffer) Write(p []byte) (int, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	return b.buf.Write(p)
+	_, _ = b.buf.Write(p)
+	if b.max > 0 && b.buf.Len() > b.max {
+		b.buf.Next(b.buf.Len() - b.max) // Discard the oldest logs
+		b.truncated = true
+	}
+	return len(p), nil
 }
 
 func (b *syncBuffer) String() string {
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	if b.truncated {
+		return logsTruncatedMsg + b.buf.String()
+	}
 	return b.buf.String()
 }
 
@@ -73,14 +86,14 @@ type jobRunInner struct {
 	panic       bool
 }
 
-func newJobRun(ctx context.Context, clock clockwork.Clock, entry Entry, idFactory IDFactory, loggerFactory JobRunLoggerFactory) *jobRunStruct {
+func newJobRun(ctx context.Context, clock clockwork.Clock, entry Entry, idFactory IDFactory, loggerFactory JobRunLoggerFactory, maxLogSize int) *jobRunStruct {
 	jr := &jobRunStruct{
 		runID:     RunID(idFactory.Next()),
 		entry:     entry,
 		clock:     clock,
 		createdAt: clock.Now(),
 		cronCtx:   ctx,
-		logsBuf:   &syncBuffer{},
+		logsBuf:   &syncBuffer{max: maxLogSize},
 		inner: mtx.NewRWMtx(jobRunInner{
 			events: make([]JobEvent, 0, 3), // Pre-allocate event slice
 		}),

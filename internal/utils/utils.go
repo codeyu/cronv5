@@ -11,7 +11,6 @@ import (
 	"runtime"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/codeyu/cronv5/internal/core"
@@ -239,13 +238,6 @@ func UuidV4Str() string {
 	hex.Encode(buf[16:20], uuid[8:10])
 	hex.Encode(buf[20:], uuid[10:])
 	return string(buf[:])
-}
-
-// NewAtomicPtr ...
-func NewAtomicPtr[T any](v *T) atomic.Pointer[T] {
-	var p atomic.Pointer[T]
-	p.Store(v)
-	return p
 }
 
 // ParallelForEach ...

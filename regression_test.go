@@ -188,7 +188,7 @@ func ignoreErr[T any](v T, _ error) T { return v }
 // B7: an exported JobRun is a snapshot, it must not share memory with the run
 func TestJobRunExportIsSnapshot(t *testing.T) {
 	clock := clockwork.NewFakeClock()
-	jr := newJobRun(context.Background(), clock, Entry{ID: "id"}, UuidIDFactory(), DefaultJobRunLoggerFactory())
+	jr := newJobRun(context.Background(), clock, Entry{ID: "id"}, UuidIDFactory(), DefaultJobRunLoggerFactory(), 0)
 	jr.inner.With(func(inner *jobRunInner) { inner.addEvent(newJobEvent(JobStart, clock)) })
 	snapshot := jr.export()
 	jr.inner.With(func(inner *jobRunInner) {
@@ -422,4 +422,171 @@ func TestSetCleanupIntervalZeroFreesCompletedRuns(t *testing.T) {
 	assert.Len(t, cron.CompletedJobs(), 1)
 	cron.SetCleanupInterval(0)
 	assert.Eventually(t, func() bool { return len(cron.CompletedJobs()) == 0 }, time.Second, time.Millisecond)
+}
+
+// Regression tests for the P1 section of TODO.md
+
+// R2: KeepJobsRunningOnStop lets the running jobs complete
+func TestKeepJobsRunningOnStop(t *testing.T) {
+	cron, _ := newRegressionCron(func(b *Builder) { b.KeepJobsRunningOnStop() })
+	cron.Start()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	ctxErr := make(chan error, 1)
+	_, _ = cron.AddJob("* * * * * *", func(ctx context.Context) {
+		close(started)
+		<-release
+		ctxErr <- ctx.Err()
+	}, RunOnStart)
+	cycle(cron)
+	<-started
+	stopped := cron.Stop()
+	close(release)
+	assert.NoError(t, recvErrWithTimeout(t, ctxErr))
+	recvWithTimeout(t, stopped, "Stop should complete once the job is done")
+}
+
+func TestStopCancelsJobsByDefault(t *testing.T) {
+	cron, _ := newRegressionCron()
+	cron.Start()
+	started := make(chan struct{})
+	ctxErr := make(chan error, 1)
+	_, _ = cron.AddJob("* * * * * *", func(ctx context.Context) {
+		close(started)
+		<-ctx.Done()
+		ctxErr <- ctx.Err()
+	}, RunOnStart)
+	cycle(cron)
+	<-started
+	recvWithTimeout(t, cron.Stop(), "Stop should complete")
+	assert.ErrorIs(t, recvErrWithTimeout(t, ctxErr), context.Canceled)
+}
+
+func TestShutdownWaitsForJobs(t *testing.T) {
+	cron, _ := newRegressionCron()
+	cron.Start()
+	started := make(chan struct{})
+	release := make(chan struct{})
+	ctxErr := make(chan error, 1)
+	_, _ = cron.AddJob("* * * * * *", func(ctx context.Context) {
+		close(started)
+		<-release
+		ctxErr <- ctx.Err()
+	}, RunOnStart)
+	cycle(cron)
+	<-started
+	shutdownErr := make(chan error, 1)
+	go func() { shutdownErr <- cron.Shutdown(context.Background()) }()
+	close(release)
+	assert.NoError(t, recvErrWithTimeout(t, ctxErr))
+	assert.NoError(t, recvErrWithTimeout(t, shutdownErr))
+	assert.False(t, cron.isRunning())
+}
+
+func TestShutdownTimeoutCancelsJobs(t *testing.T) {
+	cron, _ := newRegressionCron()
+	cron.Start()
+	started := make(chan struct{})
+	ctxErr := make(chan error, 1)
+	_, _ = cron.AddJob("* * * * * *", func(ctx context.Context) {
+		close(started)
+		<-ctx.Done()
+		ctxErr <- ctx.Err()
+	}, RunOnStart)
+	cycle(cron)
+	<-started
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
+	defer cancel()
+	assert.ErrorIs(t, cron.Shutdown(ctx), context.DeadlineExceeded)
+	assert.ErrorIs(t, recvErrWithTimeout(t, ctxErr), context.Canceled)
+	cron.waitAllJobsCompleted()
+}
+
+// R3: specs that never activate are rejected
+func TestUnsatisfiableSpecRejected(t *testing.T) {
+	cron, _ := newRegressionCron()
+	_, err := cron.AddJob("0 0 0 30 2 *", func() {})
+	assert.ErrorIs(t, err, ErrUnsatisfiableSchedule)
+	id, _ := cron.AddJob("0 0 0 * * *", func() {})
+	assert.ErrorIs(t, cron.UpdateScheduleWithSpec(id, "0 0 0 31 4 *"), ErrUnsatisfiableSchedule)
+	_, err = cron.AddJob("0 0 0 29 2 *", func() {}) // Leap day is fine
+	assert.NoError(t, err)
+}
+
+// R4: empty time zone is an error
+func TestEmptyTimeZoneRejected(t *testing.T) {
+	_, err := ParseStandard("TZ= * * * * *")
+	assert.Error(t, err)
+	_, err = ParseStandard("CRON_TZ= * * * * *")
+	assert.Error(t, err)
+	_, err = ParseStandard("CRON_TZ=UTC * * * * *")
+	assert.NoError(t, err)
+}
+
+// R5: logs kept for a job run are capped
+func TestMaxLogSize(t *testing.T) {
+	buf := &syncBuffer{max: 10}
+	n, err := buf.Write([]byte("0123456789abcdef"))
+	assert.NoError(t, err)
+	assert.Equal(t, 16, n)
+	assert.Equal(t, logsTruncatedMsg+"6789abcdef", buf.String())
+	_, _ = buf.Write([]byte("XY"))
+	assert.Equal(t, logsTruncatedMsg+"89abcdefXY", buf.String())
+
+	unlimited := &syncBuffer{}
+	_, _ = unlimited.Write([]byte("0123456789abcdef"))
+	assert.Equal(t, "0123456789abcdef", unlimited.String())
+}
+
+func TestMaxLogSizeOption(t *testing.T) {
+	cron, _ := newRegressionCron(func(b *Builder) { b.WithMaxLogSize(100).WithKeepCompletedRunsDur(time.Hour) })
+	cron.Start()
+	defer cron.Stop()
+	_, _ = cron.AddJob("* * * * * *", func(jr JobRun) {
+		for i := 0; i < 100; i++ {
+			jr.Logger().Info("some log line")
+		}
+	})
+	advanceAndCycle(cron, time.Second)
+	runs := cron.CompletedJobs()
+	assert.Len(t, runs, 1)
+	assert.LessOrEqual(t, len(runs[0].Logs), 100+len(logsTruncatedMsg))
+}
+
+// R6: number of completed runs kept per entry is capped
+func TestMaxCompletedRunsPerEntry(t *testing.T) {
+	cron, _ := newRegressionCron(func(b *Builder) { b.WithMaxCompletedRunsPerEntry(3) })
+	cron.Start()
+	defer cron.Stop()
+	id, _ := cron.AddJob("* * * * * *", func() {})
+	var runIDs []RunID
+	cron.OnEntryJobStart(id, func(_ context.Context, _ *Cron, _ HookID, jr JobRun) { runIDs = append(runIDs, jr.RunID) }, HookSync)
+	for i := 0; i < 5; i++ {
+		advanceAndCycle(cron, time.Second)
+	}
+	runs, _ := cron.CompletedJobRunsFor(id)
+	assert.Len(t, runs, 3)
+	assert.Equal(t, runIDs[2:], []RunID{runs[0].RunID, runs[1].RunID, runs[2].RunID})
+	_, err := cron.GetJobRun(id, runIDs[0])
+	assert.ErrorIs(t, err, ErrJobRunNotFound)
+	// Cleanup by age is not applied when only the max number of runs is set
+	cron.CleanupNow()
+	time.Sleep(10 * time.Millisecond)
+	runs, _ = cron.CompletedJobRunsFor(id)
+	assert.Len(t, runs, 3)
+}
+
+// R7: wrappers reject unsupported job types when they are created
+func TestWrappersPanicOnCreation(t *testing.T) {
+	assert.Panics(t, func() { Once(1) })
+	assert.Panics(t, func() { WithRetry(1, "not a job") })
+	assert.Panics(t, func() { WithTimeout(time.Second, 1) })
+	assert.Panics(t, func() { SkipIfStillRunning(1) })
+}
+
+// R11: N requires a positive number
+func TestNRequiresPositive(t *testing.T) {
+	assert.Panics(t, func() { N(0, func() {}) })
+	assert.Panics(t, func() { N(-1, func() {}) })
+	assert.NotPanics(t, func() { N(1, func() {}) })
 }

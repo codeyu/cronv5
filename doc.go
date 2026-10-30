@@ -1,49 +1,78 @@
 /*
 Package cron implements a cron spec parser and job runner.
 
-Usage
+# Usage
 
-Callers may register Funcs to be invoked on a given schedule.  Cron will run
+Callers may register jobs to be invoked on a given schedule. Cron will run
 them in their own goroutines.
 
-	c := cron.New()
-	c.AddFunc("0 30 * * * *", func() { fmt.Println("Every hour on the half hour") })
-	c.AddFunc("@hourly",      func() { fmt.Println("Every hour") })
-	c.AddFunc("@every 1h30m", func() { fmt.Println("Every hour thirty") })
+	c := cron.New().Build()
+	_, _ = c.AddJob("30 * * * *", func() { fmt.Println("Every hour on the half hour") })
+	_, _ = c.AddJob("@hourly", func() { fmt.Println("Every hour") })
+	_, _ = c.AddJob("@every 1h30m", func() { fmt.Println("Every hour thirty") })
 	c.Start()
 	..
-	// Funcs are invoked in their own goroutine, asynchronously.
+	// Jobs are invoked in their own goroutine, asynchronously.
 	...
-	// Funcs may also be added to a running Cron
-	c.AddFunc("@daily", func() { fmt.Println("Every day") })
+	// Jobs may also be added to a running Cron
+	_, _ = c.AddJob("@daily", func() { fmt.Println("Every day") })
 	..
 	// Inspect the cron job entries' next and previous run times.
 	inspect(c.Entries())
 	..
-	c.Stop()  // Stop the scheduler (does not stop any jobs already running).
+	<-c.Stop() // Stop the scheduler, cancel the context of the running jobs, and wait for them to complete.
 
-CRON Expression Format
+AddJob accepts any function (or any type with a "Run" method) with a signature
+supported by J, for example: func(), func() error, func(context.Context) error,
+func(context.Context, cron.JobRun) error... AddFunc and AddJobStrict only accept
+the complete Job signature: func(context.Context, *cron.Cron, cron.JobRun) error.
 
-A cron expression represents a set of times, using 6 space-separated fields.
+Each run of a job receives a context that is cancelled when the run is cancelled
+(CancelJobRun), when the entry is removed, when the cron is stopped, or when the job completes.
+
+# Stopping
+
+Stop stops the scheduler and returns a channel that is closed once all running jobs completed.
+By default, Stop cancels the context of the running jobs. Use the KeepJobsRunningOnStop
+builder option to let them complete, or Shutdown(ctx) for a graceful stop with a deadline:
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	if err := c.Shutdown(ctx); err != nil {
+		// Some jobs were still running after 30s, their context has been cancelled.
+	}
+
+A stopped cron can be started again. Entries whose next activation time went by while the cron
+was not running are rescheduled, instead of all running at once when the cron starts.
+
+# CRON Expression Format
+
+A cron expression represents a set of times, using 5 space-separated fields.
+When the cron is built with WithSeconds, a mandatory seconds field is added in first position,
+and the day of week field becomes optional.
 
 	Field name   | Mandatory? | Allowed values  | Allowed special characters
 	----------   | ---------- | --------------  | --------------------------
-	Seconds      | Yes        | 0-59            | * / , -
+	Seconds      | WithSeconds| 0-59            | * / , -
 	Minutes      | Yes        | 0-59            | * / , -
 	Hours        | Yes        | 0-23            | * / , -
 	Day of month | Yes        | 1-31            | * / , - ?
 	Month        | Yes        | 1-12 or JAN-DEC | * / , -
 	Day of week  | Yes        | 0-6 or SUN-SAT  | * / , - ?
 
-Note: Month and Day-of-week field values are case insensitive.  "SUN", "Sun",
+Note: Month and Day-of-week field values are case insensitive. "SUN", "Sun",
 and "sun" are equally accepted.
 
-Special Characters
+Specs that never activate (eg: "0 0 30 2 *", February 30th) are rejected with ErrUnsatisfiableSchedule.
+
+A custom parser can be configured with NewParser and the WithParser builder option.
+
+# Special Characters
 
 Asterisk ( * )
 
 The asterisk indicates that the cron expression will match for all values of the
-field; e.g., using an asterisk in the 5th field (month) would indicate every
+field; e.g., using an asterisk in the 4th field (month) would indicate every
 month.
 
 Slash ( / )
@@ -51,9 +80,9 @@ Slash ( / )
 Slashes are used to describe increments of ranges. For example 3-59/15 in the
 1st field (minutes) would indicate the 3rd minute of the hour and every 15
 minutes thereafter. The form "*\/..." is equivalent to the form "first-last/...",
-that is, an increment over the largest possible range of the field.  The form
+that is, an increment over the largest possible range of the field. The form
 "N/..." is accepted as meaning "N-MAX/...", that is, starting at N, use the
-increment until the end of that specific range.  It does not wrap around.
+increment until the end of that specific range. It does not wrap around.
 
 Comma ( , )
 
@@ -70,24 +99,24 @@ Question mark ( ? )
 Question mark may be used instead of '*' for leaving either day-of-month or
 day-of-week blank.
 
-Predefined schedules
+# Predefined schedules
 
 You may use one of several pre-defined schedules in place of a cron expression.
 
 	Entry                  | Description                                | Equivalent To
 	-----                  | -----------                                | -------------
-	@yearly (or @annually) | Run once a year, midnight, Jan. 1st        | 0 0 0 1 1 *
-	@monthly               | Run once a month, midnight, first of month | 0 0 0 1 * *
-	@weekly                | Run once a week, midnight between Sat/Sun  | 0 0 0 * * 0
-	@daily (or @midnight)  | Run once a day, midnight                   | 0 0 0 * * *
-	@hourly                | Run once an hour, beginning of hour        | 0 0 * * * *
+	@yearly (or @annually) | Run once a year, midnight, Jan. 1st        | 0 0 1 1 *
+	@monthly               | Run once a month, midnight, first of month | 0 0 1 * *
+	@weekly                | Run once a week, midnight between Sat/Sun  | 0 0 * * 0
+	@daily (or @midnight)  | Run once a day, midnight                   | 0 0 * * *
+	@hourly                | Run once an hour, beginning of hour        | 0 * * * *
 
-Intervals
+# Intervals
 
-You may also schedule a job to execute at fixed intervals, starting at the time it's added 
+You may also schedule a job to execute at fixed intervals, starting at the time it's added
 or cron is run. This is supported by formatting the cron spec like this:
 
-    @every <duration>
+	@every <duration>
 
 where "duration" is a string accepted by time.ParseDuration
 (http://golang.org/pkg/time/#ParseDuration).
@@ -95,19 +124,23 @@ where "duration" is a string accepted by time.ParseDuration
 For example, "@every 1h30m10s" would indicate a schedule that activates after
 1 hour, 30 minutes, 10 seconds, and then every interval after that.
 
-Note: The interval does not take the job runtime into account.  For example,
+Note: The interval does not take the job runtime into account. For example,
 if a job takes 3 minutes to run, and it is scheduled to run every 5 minutes,
 it will have only 2 minutes of idle time between each run.
 
-Time zones
+# Time zones
 
-All interpretation and scheduling is done in the machine's local time zone (as
-provided by the Go time package (http://www.golang.org/pkg/time).
+By default, all interpretation and scheduling is done in the time zone of the clock
+(the machine's local time zone). It can be changed with the WithLocation builder option,
+or at runtime with SetLocation.
+
+A spec can also be prefixed with "CRON_TZ=<zone>" (or "TZ=<zone>") to use a specific time zone,
+for example "CRON_TZ=Asia/Tokyo 0 6 * * *".
 
 Be aware that jobs scheduled during daylight-savings leap-ahead transitions will
-not be run!
+not be run, and jobs scheduled during leap-behind transitions will run twice!
 
-Thread safety
+# Thread safety
 
 Since the Cron service runs concurrently with the calling code, some amount of
 care must be taken to ensure proper synchronization.
@@ -115,15 +148,15 @@ care must be taken to ensure proper synchronization.
 All cron methods are designed to be correctly synchronized as long as the caller
 ensures that invocations have a clear happens-before ordering between them.
 
-Implementation
+# Implementation
 
-Cron entries are stored in an array, sorted by their next activation time.  Cron
+Cron entries are stored in a min-heap, ordered by their next activation time. Cron
 sleeps until the next job is due to be run.
 
 Upon waking:
- - it runs each entry that is active on that second
- - it calculates the next run times for the jobs that were run
- - it re-sorts the array of entries by next activation time.
- - it goes to sleep until the soonest job.
+  - it runs each entry that is active on that second
+  - it calculates the next run times for the jobs that were run
+  - it updates the position of these entries in the heap
+  - it goes to sleep until the soonest job.
 */
 package cron

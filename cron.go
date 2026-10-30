@@ -3,6 +3,7 @@ package cron
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io"
 	"iter"
 	"log/slog"
@@ -44,20 +45,26 @@ type Cron struct {
 	jobRunCreatedCh      chan JobRun                                  // Channel for receiving notifications when new job runs are created
 	jobRunCompletedCh    chan JobRun                                  // Channel for receiving notifications when job runs complete
 	keepCompletedRunsDur mtx.Mtx[time.Duration]                       // Duration to keep completed job runs before cleanup (thread-safe)
+	maxCompletedRuns     int                                          // Maximum number of completed job runs kept per entry (0 = unlimited)
+	maxLogSize           int                                          // Maximum size in bytes of the logs kept per job run (0 = unlimited)
+	keepJobsOnStop       bool                                         // Stop does not cancel the context of the running jobs
 	cleanupNowCh         chan struct{}                                // Channel to trigger immediate cleanup of completed job runs
 	lastCleanupTS        mtx.Mtx[time.Time]                           // Timestamp of last completed job runs cleanup (thread-safe)
 	hooks                mtx.RWMtx[hooksContainer]                    // Thread-safe container for managing job hooks (both global and entry-specific)
 }
 
-// lifecycle holds the context used by the scheduler loop, the cleanup thread and the job runs
+// lifecycle holds the contexts of one run of the cron (between a Start and a Stop)
 type lifecycle struct {
-	ctx    context.Context
-	cancel context.CancelFunc
+	ctx        context.Context // Used by the scheduler loop and the cleanup thread
+	cancel     context.CancelFunc
+	jobsCtx    context.Context // Parent of the job runs contexts, cancelled separately so Stop can keep jobs running
+	cancelJobs context.CancelFunc
 }
 
 func newLifecycle(parentCtx context.Context) *lifecycle {
 	ctx, cancel := context.WithCancel(parentCtx)
-	return &lifecycle{ctx: ctx, cancel: cancel}
+	jobsCtx, cancelJobs := context.WithCancel(parentCtx)
+	return &lifecycle{ctx: ctx, cancel: cancel, jobsCtx: jobsCtx, cancelJobs: cancelJobs}
 }
 
 type hooksContainer struct {
@@ -154,6 +161,9 @@ var ErrJobAlreadyRunning = errors.New("job already running")
 // ErrIDAlreadyUsed ...
 var ErrIDAlreadyUsed = errors.New("id already used")
 
+// ErrUnsatisfiableSchedule is returned when a spec never activates (eg: "0 0 30 2 *", February 30th)
+var ErrUnsatisfiableSchedule = errors.New("schedule never activates")
+
 // The Schedule describes a job's duty cycle.
 type Schedule interface {
 	// Next return the next activation time, later than the given time.
@@ -233,6 +243,9 @@ type Builder struct {
 	idFactory            IDFactory
 	jobRunLoggerFactory  JobRunLoggerFactory
 	keepCompletedRunsDur *time.Duration
+	maxCompletedRuns     int
+	maxLogSize           int
+	keepJobsOnStop       bool
 	logger               Logger
 	ctx                  context.Context
 }
@@ -279,6 +292,27 @@ func (b *Builder) WithKeepCompletedRunsDur(keepCompletedRunsDur time.Duration) *
 	return b
 }
 
+// WithMaxCompletedRunsPerEntry sets the maximum number of completed job runs kept per entry,
+// the oldest ones are freed first. Completed job runs are kept if this option, or WithKeepCompletedRunsDur, is set.
+func (b *Builder) WithMaxCompletedRunsPerEntry(n int) *Builder {
+	b.maxCompletedRuns = max(n, 0)
+	return b
+}
+
+// WithMaxLogSize sets the maximum size in bytes of the logs kept for each job run.
+// When the limit is exceeded, the oldest logs are discarded.
+func (b *Builder) WithMaxLogSize(n int) *Builder {
+	b.maxLogSize = max(n, 0)
+	return b
+}
+
+// KeepJobsRunningOnStop makes Stop wait for the running jobs without cancelling their context.
+// By default, Stop cancels the context of the running jobs.
+func (b *Builder) KeepJobsRunningOnStop() *Builder {
+	b.keepJobsOnStop = true
+	return b
+}
+
 // WithLogger sets the logger for the Cron instance.
 func (b *Builder) WithLogger(logger Logger) *Builder {
 	b.logger = logger
@@ -314,7 +348,6 @@ func (b *Builder) Build() *Cron {
 		parentCtx:            parentCtx,
 		runningJobsMap:       isync.Map[EntryID, *mtx.RWMtx[jobRunsInner]]{},
 		update:               make(chan context.CancelFunc),
-		location:             utils.NewAtomicPtr(location),
 		logger:               logger,
 		parser:               parser,
 		idFactory:            idFactory,
@@ -323,6 +356,9 @@ func (b *Builder) Build() *Cron {
 		jobRunCreatedCh:      make(chan JobRun),
 		jobRunCompletedCh:    make(chan JobRun),
 		keepCompletedRunsDur: mtx.NewMtx(keepCompletedRunsDur),
+		maxCompletedRuns:     b.maxCompletedRuns,
+		maxLogSize:           b.maxLogSize,
+		keepJobsOnStop:       b.keepJobsOnStop,
 		cleanupNowCh:         make(chan struct{}, 1),
 		hooks: mtx.NewRWMtx(hooksContainer{
 			hooksMap:       make(map[HookID]hookMeta),
@@ -334,6 +370,7 @@ func (b *Builder) Build() *Cron {
 			entriesMap: make(map[EntryID]*Entry),
 		}),
 	}
+	c.location.Store(location)
 	c.lifecycle.Store(newLifecycle(parentCtx))
 	return c
 }
@@ -351,6 +388,11 @@ func (c *Cron) Stop() <-chan struct{} { return c.stop() }
 
 // Wait stops the cron and waits for all running jobs to complete before returning.
 func (c *Cron) Wait() { c.wait() }
+
+// Shutdown gracefully stops the cron: no new job is started, and it waits for the running jobs to complete
+// without cancelling them. If ctx is done before, the context of the running jobs is cancelled
+// and ctx.Err() is returned (without waiting for jobs that ignore their context).
+func (c *Cron) Shutdown(ctx context.Context) error { return c.shutdown(ctx) }
 
 // OnEvt registers a global hook function for a specific job event type.
 // The hook will be called whenever the specified event occurs for any job.
@@ -544,19 +586,26 @@ func (c *Cron) cleanupLoop(ctx context.Context) {
 			timer = c.clock.NewTimer(keepCompletedRunsDur)
 			tickCh = timer.Chan()
 		}
+		cleanupNowReceived := false
 		select {
 		case <-tickCh:
 		case <-c.cleanupNowCh:
+			cleanupNowReceived = true
 		case <-ctx.Done():
-			if timer != nil {
-				timer.Stop()
-			}
-			return
 		}
 		if timer != nil {
 			timer.Stop()
 		}
-		c.cleanupOldRuns(ctx, c.keepCompletedRunsDur.Get())
+		if ctx.Err() != nil { // Cron stopped, possibly restarted with a new cleanup loop
+			if cleanupNowReceived {
+				c.cleanupNow() // Hand the request over to the next cleanup loop
+			}
+			return
+		}
+		// When only the max number of completed runs is set, runs are not cleaned up by age
+		if keepCompletedRunsDur := c.keepCompletedRunsDur.Get(); keepCompletedRunsDur > 0 || c.maxCompletedRuns == 0 {
+			c.cleanupOldRuns(ctx, keepCompletedRunsDur)
+		}
 	}
 }
 
@@ -571,12 +620,7 @@ func (c *Cron) cleanupOldRuns(ctx context.Context, keepCompletedRunsDur time.Dur
 				return inner.completedTS[i].After(thresholdTime)
 			})
 			if idx > 0 {
-				for i := 0; i < idx; i++ {
-					jobRun := inner.completed[i]
-					freeJobRun(inner, jobRun)
-				}
-				inner.completed = inner.completed[idx:]
-				inner.completedTS = inner.completedTS[idx:]
+				freeOldestCompletedRuns(inner, idx)
 				totalCleaned.Add(int32(idx))
 			}
 		})
@@ -616,13 +660,33 @@ func (c *Cron) startWith(runFunc func()) (started bool) {
 }
 
 func (c *Cron) stop() <-chan struct{} {
-	c.stopRunning()
+	lc := c.stopRunning()
+	if !c.keepJobsOnStop {
+		lc.cancelJobs()
+	}
 	ch := make(chan struct{})
 	go func() {
 		c.waitAllJobsCompleted()
+		lc.cancelJobs() // Release resources
 		close(ch)
 	}()
 	return ch
+}
+
+func (c *Cron) shutdown(ctx context.Context) error {
+	lc := c.stopRunning()
+	done := make(chan struct{})
+	go func() {
+		c.waitAllJobsCompleted()
+		close(done)
+	}()
+	defer lc.cancelJobs()
+	select {
+	case <-done:
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func (c *Cron) wait() {
@@ -649,15 +713,17 @@ func (c *Cron) startRunning() bool {
 	return true
 }
 
-func (c *Cron) stopRunning() bool {
+// stopRunning stops the scheduler, and returns the lifecycle of the run that was stopped
+// (or of the last run if the cron was not running)
+func (c *Cron) stopRunning() *lifecycle {
 	c.lifecycleMu.Lock()
 	defer c.lifecycleMu.Unlock()
-	if !c.running.Load() {
-		return false
+	lc := c.lifecycle.Load()
+	if c.running.Load() {
+		c.running.Store(false)
+		lc.cancel()
 	}
-	c.running.Store(false)
-	c.lifecycle.Load().cancel()
-	return true
+	return lc
 }
 func (c *Cron) isRunning() bool {
 	return c.running.Load()
@@ -810,12 +876,24 @@ func (c *Cron) addFunc(spec string, job FuncJob, opts ...EntryOption) (EntryID, 
 }
 
 func (c *Cron) addJobStrict(spec string, job Job, opts ...EntryOption) (EntryID, error) {
-	schedule, err := c.parser.Parse(spec)
+	schedule, err := c.parseSpec(spec)
 	if err != nil {
 		var zeroID EntryID
 		return zeroID, err
 	}
 	return c.schedule(&spec, schedule, job, opts...)
+}
+
+// parseSpec parses the spec and ensures the schedule will activate at least once
+func (c *Cron) parseSpec(spec string) (Schedule, error) {
+	schedule, err := c.parser.Parse(spec)
+	if err != nil {
+		return nil, err
+	}
+	if schedule.Next(c.now()).IsZero() {
+		return nil, fmt.Errorf("%w: %s", ErrUnsatisfiableSchedule, spec)
+	}
+	return schedule, nil
 }
 
 func (c *Cron) schedule(spec *string, schedule Schedule, job Job, opts ...EntryOption) (EntryID, error) {
@@ -917,7 +995,7 @@ func (c *Cron) updateSchedule(id EntryID, spec *string, schedule Schedule) error
 }
 
 func (c *Cron) updateScheduleWithSpec(id EntryID, spec string) error {
-	schedule, err := c.parser.Parse(spec)
+	schedule, err := c.parseSpec(spec)
 	if err != nil {
 		return err
 	}
@@ -1098,8 +1176,10 @@ func jobRunsClb[T any](jobRuns *mtx.RWMtx[jobRunsInner], clb func(jobRunsInner) 
 	return
 }
 
+// jobRunsExportClb exports the job runs while holding the lock,
+// the slices returned by "clb" are modified in place (slices.Delete) once the lock is released.
 func jobRunsExportClb(jobRuns *mtx.RWMtx[jobRunsInner], clb func(jobRunsInner) []*jobRunStruct) []JobRun {
-	return exportJobRuns(jobRunsClb(jobRuns, clb))
+	return jobRunsClb(jobRuns, func(v jobRunsInner) []JobRun { return exportJobRuns(clb(v)) })
 }
 
 func (c *Cron) jobRunsClb(clb func(jobRunsInner) []*jobRunStruct) (out []JobRun) {
@@ -1163,10 +1243,13 @@ func (c *Cron) completeJobRun(entryID EntryID, jobRun *jobRunStruct) {
 	jobRuns.With(func(v *jobRunsInner) {
 		if idx := slices.Index((*v).running, jobRun); idx != -1 {
 			(*v).running = slices.Delete((*v).running, idx, idx+1)
-			if c.keepCompletedRunsDur.Get() > 0 {
+			if c.keepCompletedRunsDur.Get() > 0 || c.maxCompletedRuns > 0 {
 				completedAt := jobRun.inner.Get().completedAt
 				(*v).completed = append((*v).completed, jobRun)
 				(*v).completedTS = append((*v).completedTS, *completedAt)
+				if c.maxCompletedRuns > 0 && len((*v).completed) > c.maxCompletedRuns {
+					freeOldestCompletedRuns(v, len((*v).completed)-c.maxCompletedRuns)
+				}
 			} else {
 				freeJobRun(v, jobRun)
 			}
@@ -1178,10 +1261,20 @@ func freeJobRun(v *jobRunsInner, jobRun *jobRunStruct) {
 	delete((*v).mapping, jobRun.runID)
 }
 
+// freeOldestCompletedRuns frees the "n" oldest completed job runs
+func freeOldestCompletedRuns(v *jobRunsInner, n int) {
+	for _, jobRun := range (*v).completed[:n] {
+		freeJobRun(v, jobRun)
+	}
+	// slices.Delete clears the tail, so the backing array does not retain the freed runs
+	(*v).completed = slices.Delete((*v).completed, 0, n)
+	(*v).completedTS = slices.Delete((*v).completedTS, 0, n)
+}
+
 // startJob runs the given job in a new goroutine.
 // Must be called while holding the entries lock.
 func (c *Cron) startJob(entry Entry) {
-	jobRun := newJobRun(c.ctx(), c.clock, entry, c.idFactory, c.jobRunLoggerFactory)
+	jobRun := newJobRun(c.lifecycle.Load().jobsCtx, c.clock, entry, c.idFactory, c.jobRunLoggerFactory, c.maxLogSize)
 	c.runningJobsCount.Add(1)
 	c.registerJobRun(entry.ID, jobRun)
 	go func() {

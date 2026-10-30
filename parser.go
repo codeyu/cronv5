@@ -98,6 +98,9 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 			return nil, fmt.Errorf("invalid spec string")
 		}
 		eq := strings.Index(spec, "=")
+		if eq+1 == i {
+			return nil, fmt.Errorf("empty location: %s", spec)
+		}
 		if loc, err = time.LoadLocation(spec[eq+1 : i]); err != nil {
 			return nil, fmt.Errorf("provided bad location %s: %v", spec[eq+1:i], err)
 		}

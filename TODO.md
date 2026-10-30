@@ -77,19 +77,19 @@
 - [x] **B16 `SetCleanupInterval` 可能启动多个清理线程** 🔍
   `cron.go:566`：设为 0 后旧线程要等下一轮才退出，此时再设为非 0 会起第二个线程。用单一常驻线程 + 通知 channel 替代。
 
-## P1 — 行为/文档不一致、健壮性
+## P1 — 行为/文档不一致、健壮性（✔ 已完成）
 
-- [ ] **R1 `doc.go` 过时**：示例 `c.AddFunc("...", func(){})` 无法编译（`AddFunc` 需要 `FuncJob`）；表格写 6 个字段必填，但默认 parser 是 5 字段；“Stop 不会停止正在运行的 job”与实际（Stop 会 cancel 所有 job ctx）不符。
-- [ ] **R2 Stop/Remove 是否取消运行中 job 改为可选项**：`Stop()` 现在一律 cancel；建议 `StopWithContext(ctx)`（优雅关闭+超时）与 `WithCancelJobsOnStop(bool)`。（rc#98）
-- [ ] **R3 不可满足的表达式静默接受**：`0 0 30 2 *` 返回零时间、永不执行。`AddJob` 时检测 `Next().IsZero()` 返回错误（或提供 `Validate`）。（rc#110）
-- [ ] **R4 `TZ= * * * * *`（空时区）被静默当成 UTC**，应返回错误。
-- [ ] **R5 日志 buffer 无上限**：频繁打日志的 job 会无限增长内存；加 `WithMaxLogSize`。
-- [ ] **R6 completed runs 仅按时间清理**：再加按条数上限（`WithMaxCompletedRunsPerEntry`）。
-- [ ] **R7 wrapper 在每次运行时才 `J(job)` 转换**：不支持的类型在运行时才 panic（被 recover 成 JobPanic），应在构造 wrapper 时转换并尽早报错。
-- [ ] **R8 `go vet` 警告**：`internal/utils/utils.go:248 NewAtomicPtr` 按值返回 `atomic.Pointer`（copylocks）。
-- [ ] **R9 依赖 `replace` 到 clockwork fork**：`replace` 对下游不生效，库代码实际编译的是上游 `v0.5.0`，而测试依赖 fork 独有的 `SleepNotify/AfterNotify`。建议测试改为上游 API（`BlockUntilContext`）并移除 replace，避免测试与用户实际使用的版本不一致。
-- [ ] **R10 CI**：`.travis.yml` 已过时，换成 GitHub Actions（`go vet`、`go test -race`、多 Go 版本）。
-- [ ] **R11 `NWrapper(n<=0)`** 永远不会移除，需参数校验。
+- [x] **R1 `doc.go` 过时**：示例 `c.AddFunc("...", func(){})` 无法编译（`AddFunc` 需要 `FuncJob`）；表格写 6 个字段必填，但默认 parser 是 5 字段；“Stop 不会停止正在运行的 job”与实际（Stop 会 cancel 所有 job ctx）不符。
+- [x] **R2 Stop/Remove 是否取消运行中 job 改为可选项**：`Stop()` 现在一律 cancel；建议 `StopWithContext(ctx)`（优雅关闭+超时）与 `WithCancelJobsOnStop(bool)`。（rc#98）
+- [x] **R3 不可满足的表达式静默接受**：`0 0 30 2 *` 返回零时间、永不执行。`AddJob` 时检测 `Next().IsZero()` 返回错误（或提供 `Validate`）。（rc#110）
+- [x] **R4 `TZ= * * * * *`（空时区）被静默当成 UTC**，应返回错误。
+- [x] **R5 日志 buffer 无上限**：频繁打日志的 job 会无限增长内存；加 `WithMaxLogSize`。
+- [x] **R6 completed runs 仅按时间清理**：再加按条数上限（`WithMaxCompletedRunsPerEntry`）。
+- [x] **R7 wrapper 在每次运行时才 `J(job)` 转换**：不支持的类型在运行时才 panic（被 recover 成 JobPanic），应在构造 wrapper 时转换并尽早报错。
+- [x] **R8 `go vet` 警告**：`internal/utils/utils.go:248 NewAtomicPtr` 按值返回 `atomic.Pointer`（copylocks）。
+- [x] **R9 依赖 `replace` 到 clockwork fork**：`replace` 对下游不生效，库代码实际编译的是上游 `v0.5.0`，而测试依赖 fork 独有的 `SleepNotify/AfterNotify`。建议测试改为上游 API（`BlockUntilContext`）并移除 replace，避免测试与用户实际使用的版本不一致。
+- [x] **R10 CI**：`.travis.yml` 已过时，换成 GitHub Actions（`go vet`、`go test -race`、多 Go 版本）。
+- [x] **R11 `NWrapper(n<=0)`** 永远不会移除，需参数校验。
 
 ## P2 — 性能优化
 

@@ -37,6 +37,19 @@ func advanceAndCycleNoWait(cron *Cron, d time.Duration) {
 	cycle(cron)
 }
 
+// sleepNotify sleeps on the fake clock, closing "ch" once the timer is registered,
+// so the caller knows it is safe to advance the clock.
+func sleepNotify(clock *clockwork.FakeClock, d time.Duration, ch chan struct{}) {
+	<-afterNotify(clock, d, ch)
+}
+
+// afterNotify is clock.After, closing "ch" once the timer is registered.
+func afterNotify(clock *clockwork.FakeClock, d time.Duration, ch chan struct{}) <-chan time.Time {
+	timerCh := clock.NewTimer(d).Chan()
+	close(ch)
+	return timerCh
+}
+
 func recvWithTimeout(t *testing.T, ch <-chan struct{}, msg ...string) {
 	select {
 	case <-ch:
@@ -200,7 +213,7 @@ func TestStopWait(t *testing.T) {
 	c2 := make(chan struct{})
 	_, _ = cron.AddJob("1 0 1 * * *", func(jr JobRun) {
 		jr.Logger()
-		clock.SleepNotify(time.Minute, c1)
+		sleepNotify(clock, time.Minute, c1)
 	})
 	cron.Start()
 	advanceAndCycleNoWait(cron, time.Second)
@@ -220,7 +233,7 @@ func TestWait(t *testing.T) {
 	c1 := make(chan struct{})
 	c2 := make(chan struct{})
 	_, _ = cron.AddJob("1 0 1 * * *", func() {
-		clock.SleepNotify(time.Minute, c1)
+		sleepNotify(clock, time.Minute, c1)
 	})
 	cron.Start()
 	advanceAndCycleNoWait(cron, time.Second)
@@ -1146,7 +1159,7 @@ func TestIsRunning(t *testing.T) {
 	cron := New().WithClock(clock).WithParser(secondParser).WithLogger(newErrLogger()).Build()
 	c1 := make(chan struct{})
 	id, _ := cron.AddJob("0 0 * * * *", func() {
-		clock.SleepNotify(time.Minute, c1)
+		sleepNotify(clock, time.Minute, c1)
 	})
 	cron.Start()
 	assert.False(t, cron.IsRunning(id))
@@ -1357,7 +1370,7 @@ func TestEvents(t *testing.T) {
 	cron := New().WithClock(clock).WithLogger(newNoOpLogger()).Build()
 	c1 := make(chan struct{})
 	id, _ := cron.AddJob("* * * * *", SkipIfStillRunning(func() {
-		clock.SleepNotify(150*time.Second, c1) // sleep 2m30s
+		sleepNotify(clock, 150*time.Second, c1) // sleep 2m30s
 	}))
 	cron.Start()
 
@@ -1400,8 +1413,8 @@ func TestRunningJobs(t *testing.T) {
 	cron := New().WithClock(clock).WithParser(secondParser).WithLogger(newErrLogger()).Build()
 	c1 := make(chan struct{})
 	c2 := make(chan struct{})
-	_, _ = cron.AddJob("* * * * * *", func() { clock.SleepNotify(time.Minute, c1) })
-	_, _ = cron.AddJob("* * * * * *", func() { clock.SleepNotify(time.Minute, c2) })
+	_, _ = cron.AddJob("* * * * * *", func() { sleepNotify(clock, time.Minute, c1) })
+	_, _ = cron.AddJob("* * * * * *", func() { sleepNotify(clock, time.Minute, c2) })
 	cron.Start()
 	advanceAndCycleNoWait(cron, time.Second)
 	<-c1
@@ -1420,11 +1433,11 @@ func TestRunningJobsFor(t *testing.T) {
 	id, _ := cron.AddJob("* * * * * *", func() {
 		val := calls.Add(1)
 		if val == 1 {
-			clock.SleepNotify(time.Minute, c1)
+			sleepNotify(clock, time.Minute, c1)
 		} else if val == 2 {
-			clock.SleepNotify(time.Minute, c2)
+			sleepNotify(clock, time.Minute, c2)
 		} else if val == 3 {
-			clock.SleepNotify(time.Minute, c3)
+			sleepNotify(clock, time.Minute, c3)
 		}
 	})
 	cron.Start()
@@ -1470,7 +1483,7 @@ func TestCancelRun(t *testing.T) {
 	c1 := make(chan struct{})
 	id, _ := cron.AddJob("* * * * *", func(ctx context.Context) {
 		select {
-		case <-clock.AfterNotify(time.Minute, c1):
+		case <-afterNotify(clock, time.Minute, c1):
 		case <-ctx.Done():
 		}
 	})
@@ -1493,28 +1506,35 @@ func TestCancelRun(t *testing.T) {
 
 func TestJobRunEvents(t *testing.T) {
 	clock := clockwork.NewFakeClockAt(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC))
-	cron := New().WithClock(clock).WithKeepCompletedRunsDur(0).WithLogger(newErrLogger()).Build()
-	c0 := make(chan struct{})
-	_, _ = cron.AddJob("* * * * *", func() { clock.SleepNotify(time.Second, c0) })
+	cron := New().WithClock(clock).WithParser(secondParser).WithKeepCompletedRunsDur(0).WithLogger(newErrLogger()).Build()
+	_, _ = cron.AddJob("* * * * * *", func() {})
 	cron.Start()
+	defer cron.Stop()
 	createdCh := cron.JobRunCreatedCh()
 	completedCh := cron.JobRunCompletedCh()
-	c1 := make(chan struct{})
-	c2 := make(chan struct{})
-	c3 := make(chan struct{})
-	go func() {
-		close(c1)
-		<-createdCh
-		close(c2)
-		<-completedCh
-		close(c3)
-	}()
-	<-c1
-	advanceAndCycleNoWait(cron, time.Minute)
-	<-c2
-	<-c0
-	advanceAndCycleNoWait(cron, time.Second)
-	<-c3
+	// Events are sent without blocking, they are dropped if nobody is receiving at that moment,
+	// so keep running the job until both events have been received.
+	var gotCreated, gotCompleted bool
+	for i := 0; i < 1000 && !(gotCreated && gotCompleted); i++ {
+		done := make(chan struct{})
+		go func() {
+			advanceAndCycle(cron, time.Second)
+			close(done)
+		}()
+	loop:
+		for {
+			select {
+			case <-createdCh:
+				gotCreated = true
+			case <-completedCh:
+				gotCompleted = true
+			case <-done:
+				break loop
+			}
+		}
+	}
+	assert.True(t, gotCreated)
+	assert.True(t, gotCompleted)
 }
 
 func TestGetCleanupTS(t *testing.T) {
