@@ -1,5 +1,5 @@
 {{ define "content" }}
-Completed jobs ({{ len .CompletedJobRuns }})<br />
+Completed jobs ({{ len .CompletedJobRuns }}{{ if gt .Limit 0 }}, latest {{ .Limit }} at most, <a href="?limit=0">show all</a>{{ end }})<br />
 <table>
     <thead>
         <tr>

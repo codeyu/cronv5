@@ -10,7 +10,7 @@
     Logs: {{ if not .JobRun.Logs }}-{{ end }}<br />
     {{ if .JobRun.Logs }}
         <div class="logs">
-            {{ .JobRun.Logs | Nl2br | Safe }}
+            {{ .JobRun.Logs | Nl2br }}
         </div>
     {{ end }}
 </div>

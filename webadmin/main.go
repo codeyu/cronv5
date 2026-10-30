@@ -3,9 +3,12 @@ package webadmin
 import (
 	"bytes"
 	"embed"
+	"fmt"
 	"html/template"
 	"net/http"
+	"net/url"
 	"slices"
+	"strconv"
 	"strings"
 	"time"
 
@@ -37,8 +40,12 @@ func GetMux(c *cron.Cron) *http.ServeMux {
 var funcsMap = template.FuncMap{
 	"FmtDate":  func(t time.Time) string { return t.Format(time.DateTime) },
 	"ShortDur": func(t time.Time) string { return utils.ShortDur(t) },
-	"Nl2br":    func(v string) string { return strings.ReplaceAll(v, "\n", "<br />") },
-	"Safe":     func(v string) template.HTML { return template.HTML(v) },
+	"Nl2br":    nl2br,
+}
+
+// nl2br escapes the string and replaces new lines with <br />
+func nl2br(v string) template.HTML {
+	return template.HTML(strings.ReplaceAll(template.HTMLEscapeString(v), "\n", "<br />"))
 }
 
 func redirectTo(w http.ResponseWriter, l string) error {
@@ -47,18 +54,21 @@ func redirectTo(w http.ResponseWriter, l string) error {
 	return nil
 }
 
+// templates are parsed once, each page is combined with the base layout
+var templates = func() map[string]*template.Template {
+	pages := []string{"index", "completed", "entry", "run", "hook"}
+	out := make(map[string]*template.Template, len(pages))
+	for _, page := range pages {
+		name := "templates/" + page + ".gohtml"
+		out[name] = template.Must(template.New("").Funcs(funcsMap).ParseFS(fs, "templates/base.gohtml", name))
+	}
+	return out
+}()
+
 func render(code int, name string, data any, w http.ResponseWriter) error {
-	files := []string{"templates/base.gohtml", name}
-	tmpl := template.New("").Funcs(funcsMap)
-	for _, fileName := range files {
-		fileContent, err := fs.ReadFile(fileName)
-		if err != nil {
-			return err
-		}
-		tmpl, err = tmpl.Parse(string(fileContent))
-		if err != nil {
-			return err
-		}
+	tmpl, ok := templates[name]
+	if !ok {
+		return fmt.Errorf("unknown template %s", name)
 	}
 	var b bytes.Buffer
 	if err := tmpl.ExecuteTemplate(&b, "base", data); err != nil {
@@ -73,9 +83,26 @@ func render(code int, name string, data any, w http.ResponseWriter) error {
 type M func(w http.ResponseWriter, r *http.Request) error
 
 func (m M) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost && isCrossOrigin(r) {
+		http.Error(w, "cross-origin request rejected", http.StatusForbidden)
+		return
+	}
 	if err := (m)(w, r); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 	}
+}
+
+// isCrossOrigin reports whether the request was sent by another site (CSRF protection).
+// Requests without Sec-Fetch-Site nor Origin headers (non-browser clients) are allowed.
+func isCrossOrigin(r *http.Request) bool {
+	if site := r.Header.Get("Sec-Fetch-Site"); site != "" {
+		return site != "same-origin" && site != "none"
+	}
+	if origin := r.Header.Get("Origin"); origin != "" {
+		u, err := url.Parse(origin)
+		return err != nil || u.Host != r.Host
+	}
+	return false
 }
 
 type commonData struct {
@@ -100,6 +127,7 @@ type indexData struct {
 type completedData struct {
 	commonData
 	CompletedJobRuns []cron.JobRun
+	Limit            int
 }
 
 type entryData struct {
@@ -174,10 +202,13 @@ func cleanupNowHandler(c *cron.Cron) http.Handler {
 
 func completedHandler(c *cron.Cron) http.Handler {
 	return M(func(w http.ResponseWriter, r *http.Request) error {
-		completedJobRuns := c.CompletedJobs()
-		slices.Reverse(completedJobRuns)
+		limit := 100
+		if v, err := strconv.Atoi(r.URL.Query().Get("limit")); err == nil {
+			limit = v // limit <= 0 shows all the completed runs
+		}
 		data := completedData{
-			CompletedJobRuns: completedJobRuns,
+			CompletedJobRuns: c.RecentCompletedJobs(limit),
+			Limit:            limit,
 		}
 		data.setCommonData(c)
 		return render(http.StatusOK, "templates/completed.gohtml", data, w)

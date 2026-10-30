@@ -5,6 +5,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -98,7 +99,10 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 			return nil, fmt.Errorf("invalid spec string")
 		}
 		eq := strings.Index(spec, "=")
-		if loc, err = time.LoadLocation(spec[eq+1 : i]); err != nil {
+		if eq+1 == i {
+			return nil, fmt.Errorf("empty location: %s", spec)
+		}
+		if loc, err = loadLocation(spec[eq+1 : i]); err != nil {
 			return nil, fmt.Errorf("provided bad location %s: %v", spec[eq+1:i], err)
 		}
 		spec = strings.TrimSpace(spec[i:])
@@ -152,6 +156,22 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 		Dow:      dayofweek,
 		Location: loc,
 	}, nil
+}
+
+// locationCache caches time.LoadLocation, which reads the tz database on every call.
+// Only valid locations are cached, so the cache is bounded by the size of the tz database.
+var locationCache sync.Map // map[string]*time.Location
+
+func loadLocation(name string) (*time.Location, error) {
+	if loc, ok := locationCache.Load(name); ok {
+		return loc.(*time.Location), nil
+	}
+	loc, err := time.LoadLocation(name)
+	if err != nil {
+		return nil, err
+	}
+	locationCache.Store(name, loc)
+	return loc, nil
 }
 
 // normalizeFields takes a subset set of the time fields and returns the full set

@@ -2,7 +2,6 @@ package cron
 
 import (
 	"context"
-	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -76,12 +75,16 @@ func (f FuncJob) Run(ctx context.Context, c *Cron, r JobRun) error { return f(ct
 
 type Job1Wrapper struct{ Job1 }
 
+func (j *Job1Wrapper) unwrapJob() any { return j.Job1 }
+
 func (j *Job1Wrapper) Run(context.Context, *Cron, JobRun) error {
 	j.Job1.Run()
 	return nil
 }
 
 type Job2Wrapper struct{ Job2 }
+
+func (j *Job2Wrapper) unwrapJob() any { return j.Job2 }
 
 func (j *Job2Wrapper) Run(ctx context.Context, _ *Cron, _ JobRun) error {
 	j.Job2.Run(ctx)
@@ -90,12 +93,16 @@ func (j *Job2Wrapper) Run(ctx context.Context, _ *Cron, _ JobRun) error {
 
 type Job3Wrapper struct{ Job3 }
 
+func (j *Job3Wrapper) unwrapJob() any { return j.Job3 }
+
 func (j *Job3Wrapper) Run(_ context.Context, _ *Cron, r JobRun) error {
 	j.Job3.Run(r.Entry.ID)
 	return nil
 }
 
 type Job4Wrapper struct{ Job4 }
+
+func (j *Job4Wrapper) unwrapJob() any { return j.Job4 }
 
 func (j *Job4Wrapper) Run(ctx context.Context, _ *Cron, r JobRun) error {
 	j.Job4.Run(ctx, r.Entry.ID)
@@ -104,9 +111,13 @@ func (j *Job4Wrapper) Run(ctx context.Context, _ *Cron, r JobRun) error {
 
 type Job5Wrapper struct{ Job5 }
 
+func (j *Job5Wrapper) unwrapJob() any { return j.Job5 }
+
 func (j *Job5Wrapper) Run(context.Context, *Cron, JobRun) error { return j.Job5.Run() }
 
 type Job6Wrapper struct{ Job6 }
+
+func (j *Job6Wrapper) unwrapJob() any { return j.Job6 }
 
 func (j *Job6Wrapper) Run(ctx context.Context, _ *Cron, _ JobRun) error {
 	return j.Job6.Run(ctx)
@@ -114,17 +125,23 @@ func (j *Job6Wrapper) Run(ctx context.Context, _ *Cron, _ JobRun) error {
 
 type Job7Wrapper struct{ Job7 }
 
+func (j *Job7Wrapper) unwrapJob() any { return j.Job7 }
+
 func (j *Job7Wrapper) Run(_ context.Context, _ *Cron, r JobRun) error {
 	return j.Job7.Run(r.Entry.ID)
 }
 
 type Job8Wrapper struct{ Job8 }
 
+func (j *Job8Wrapper) unwrapJob() any { return j.Job8 }
+
 func (j *Job8Wrapper) Run(ctx context.Context, _ *Cron, r JobRun) error {
 	return j.Job8.Run(ctx, r.Entry.ID)
 }
 
 type Job9Wrapper struct{ Job9 }
+
+func (j *Job9Wrapper) unwrapJob() any { return j.Job9 }
 
 func (j *Job9Wrapper) Run(_ context.Context, cron *Cron, _ JobRun) error {
 	j.Job9.Run(cron)
@@ -133,11 +150,15 @@ func (j *Job9Wrapper) Run(_ context.Context, cron *Cron, _ JobRun) error {
 
 type Job10Wrapper struct{ Job10 }
 
+func (j *Job10Wrapper) unwrapJob() any { return j.Job10 }
+
 func (j *Job10Wrapper) Run(_ context.Context, cron *Cron, _ JobRun) error {
 	return j.Job10.Run(cron)
 }
 
 type Job11Wrapper struct{ Job11 }
+
+func (j *Job11Wrapper) unwrapJob() any { return j.Job11 }
 
 func (j *Job11Wrapper) Run(ctx context.Context, cron *Cron, _ JobRun) error {
 	j.Job11.Run(ctx, cron)
@@ -146,11 +167,15 @@ func (j *Job11Wrapper) Run(ctx context.Context, cron *Cron, _ JobRun) error {
 
 type Job12Wrapper struct{ Job12 }
 
+func (j *Job12Wrapper) unwrapJob() any { return j.Job12 }
+
 func (j *Job12Wrapper) Run(ctx context.Context, cron *Cron, _ JobRun) error {
 	return j.Job12.Run(ctx, cron)
 }
 
 type Job13Wrapper struct{ Job13 }
+
+func (j *Job13Wrapper) unwrapJob() any { return j.Job13 }
 
 func (j *Job13Wrapper) Run(_ context.Context, cron *Cron, r JobRun) error {
 	j.Job13.Run(cron, r.Entry.ID)
@@ -159,11 +184,15 @@ func (j *Job13Wrapper) Run(_ context.Context, cron *Cron, r JobRun) error {
 
 type Job14Wrapper struct{ Job14 }
 
+func (j *Job14Wrapper) unwrapJob() any { return j.Job14 }
+
 func (j *Job14Wrapper) Run(_ context.Context, cron *Cron, r JobRun) error {
 	return j.Job14.Run(cron, r.Entry.ID)
 }
 
 type Job15Wrapper struct{ Job15 }
+
+func (j *Job15Wrapper) unwrapJob() any { return j.Job15 }
 
 func (j *Job15Wrapper) Run(ctx context.Context, cron *Cron, r JobRun) error {
 	j.Job15.Run(ctx, cron, r.Entry.ID)
@@ -172,11 +201,15 @@ func (j *Job15Wrapper) Run(ctx context.Context, cron *Cron, r JobRun) error {
 
 type Job16Wrapper struct{ Job16 }
 
+func (j *Job16Wrapper) unwrapJob() any { return j.Job16 }
+
 func (j *Job16Wrapper) Run(ctx context.Context, cron *Cron, r JobRun) error {
 	return j.Job16.Run(ctx, cron, r.Entry.ID)
 }
 
 type Job17Wrapper struct{ Job17 }
+
+func (j *Job17Wrapper) unwrapJob() any { return j.Job17 }
 
 func (j *Job17Wrapper) Run(_ context.Context, _ *Cron, r JobRun) error {
 	j.Job17.Run(r.Entry)
@@ -185,11 +218,15 @@ func (j *Job17Wrapper) Run(_ context.Context, _ *Cron, r JobRun) error {
 
 type Job18Wrapper struct{ Job18 }
 
+func (j *Job18Wrapper) unwrapJob() any { return j.Job18 }
+
 func (j *Job18Wrapper) Run(_ context.Context, _ *Cron, r JobRun) error {
 	return j.Job18.Run(r.Entry)
 }
 
 type Job19Wrapper struct{ Job19 }
+
+func (j *Job19Wrapper) unwrapJob() any { return j.Job19 }
 
 func (j *Job19Wrapper) Run(ctx context.Context, _ *Cron, r JobRun) error {
 	j.Job19.Run(ctx, r.Entry)
@@ -198,11 +235,15 @@ func (j *Job19Wrapper) Run(ctx context.Context, _ *Cron, r JobRun) error {
 
 type Job20Wrapper struct{ Job20 }
 
+func (j *Job20Wrapper) unwrapJob() any { return j.Job20 }
+
 func (j *Job20Wrapper) Run(ctx context.Context, _ *Cron, r JobRun) error {
 	return j.Job20.Run(ctx, r.Entry)
 }
 
 type Job21Wrapper struct{ Job21 }
+
+func (j *Job21Wrapper) unwrapJob() any { return j.Job21 }
 
 func (j *Job21Wrapper) Run(_ context.Context, c *Cron, r JobRun) error {
 	j.Job21.Run(c, r.Entry)
@@ -211,11 +252,15 @@ func (j *Job21Wrapper) Run(_ context.Context, c *Cron, r JobRun) error {
 
 type Job22Wrapper struct{ Job22 }
 
+func (j *Job22Wrapper) unwrapJob() any { return j.Job22 }
+
 func (j *Job22Wrapper) Run(_ context.Context, c *Cron, r JobRun) error {
 	return j.Job22.Run(c, r.Entry)
 }
 
 type Job23Wrapper struct{ Job23 }
+
+func (j *Job23Wrapper) unwrapJob() any { return j.Job23 }
 
 func (j *Job23Wrapper) Run(ctx context.Context, c *Cron, r JobRun) error {
 	j.Job23.Run(ctx, c, r.Entry)
@@ -224,6 +269,8 @@ func (j *Job23Wrapper) Run(ctx context.Context, c *Cron, r JobRun) error {
 
 type Job24Wrapper struct{ Job24 }
 
+func (j *Job24Wrapper) unwrapJob() any { return j.Job24 }
+
 func (j *Job24Wrapper) Run(_ context.Context, _ *Cron, r JobRun) error {
 	j.Job24.Run(r)
 	return nil
@@ -231,11 +278,15 @@ func (j *Job24Wrapper) Run(_ context.Context, _ *Cron, r JobRun) error {
 
 type Job25Wrapper struct{ Job25 }
 
+func (j *Job25Wrapper) unwrapJob() any { return j.Job25 }
+
 func (j *Job25Wrapper) Run(_ context.Context, _ *Cron, r JobRun) error {
 	return j.Job25.Run(r)
 }
 
 type Job26Wrapper struct{ Job26 }
+
+func (j *Job26Wrapper) unwrapJob() any { return j.Job26 }
 
 func (j *Job26Wrapper) Run(ctx context.Context, _ *Cron, r JobRun) error {
 	j.Job26.Run(ctx, r)
@@ -244,11 +295,15 @@ func (j *Job26Wrapper) Run(ctx context.Context, _ *Cron, r JobRun) error {
 
 type Job27Wrapper struct{ Job27 }
 
+func (j *Job27Wrapper) unwrapJob() any { return j.Job27 }
+
 func (j *Job27Wrapper) Run(ctx context.Context, _ *Cron, r JobRun) error {
 	return j.Job27.Run(ctx, r)
 }
 
 type Job28Wrapper struct{ Job28 }
+
+func (j *Job28Wrapper) unwrapJob() any { return j.Job28 }
 
 func (j *Job28Wrapper) Run(_ context.Context, c *Cron, r JobRun) error {
 	j.Job28.Run(c, r)
@@ -257,11 +312,15 @@ func (j *Job28Wrapper) Run(_ context.Context, c *Cron, r JobRun) error {
 
 type Job29Wrapper struct{ Job29 }
 
+func (j *Job29Wrapper) unwrapJob() any { return j.Job29 }
+
 func (j *Job29Wrapper) Run(_ context.Context, c *Cron, r JobRun) error {
 	return j.Job29.Run(c, r)
 }
 
 type Job30Wrapper struct{ Job30 }
+
+func (j *Job30Wrapper) unwrapJob() any { return j.Job30 }
 
 func (j *Job30Wrapper) Run(ctx context.Context, c *Cron, r JobRun) error {
 	j.Job30.Run(ctx, c, r)
@@ -269,6 +328,8 @@ func (j *Job30Wrapper) Run(ctx context.Context, c *Cron, r JobRun) error {
 }
 
 type Job31Wrapper struct{ Job31 }
+
+func (j *Job31Wrapper) unwrapJob() any { return j.Job31 }
 
 func (j *Job31Wrapper) Run(ctx context.Context, c *Cron, r JobRun) error {
 	return j.Job31.Run(ctx, c, r.Entry)
@@ -530,21 +591,29 @@ func castIntoJob(v IntoJob) Job {
 
 type JobWrapper func(IntoJob) Job
 
+// Once runs a job only one time, the entry is removed when the job starts.
 func Once(job IntoJob) Job {
+	inner := J(job) // Convert once, unsupported types panic when the wrapper is created
 	return FuncJob(func(ctx context.Context, c *Cron, r JobRun) error {
-		c.Remove(r.Entry.ID)
-		return J(job).Run(ctx, c, r)
+		c.removeKeepRun(r.Entry.ID, r.RunID) // Do not cancel the current run
+		return inner.Run(ctx, c, r)
 	})
 }
 
+// NWrapper creates a JobWrapper that runs a job "n" times, then removes the entry.
+// It panics if n <= 0.
 func NWrapper(n int) JobWrapper {
+	if n <= 0 {
+		panic("cron: N requires n > 0")
+	}
 	return func(job IntoJob) Job {
 		var count atomic.Int32
+		inner := J(job)
 		return FuncJob(func(ctx context.Context, c *Cron, r JobRun) error {
 			if newCount := count.Add(1); int(newCount) == n {
-				c.Remove(r.Entry.ID)
+				c.removeKeepRun(r.Entry.ID, r.RunID) // Do not cancel the current run
 			}
-			return J(job).Run(ctx, c, r)
+			return inner.Run(ctx, c, r)
 		})
 	}
 }
@@ -562,19 +631,22 @@ type ThresholdCallbackAsync func(ctx context.Context, c *Cron, r JobRun, thresho
 // The callback is invoked asynchronously and does not block job execution.
 func ThresholdClbAsyncWrapper(threshold time.Duration, clb ThresholdCallbackAsync) JobWrapper {
 	return func(job IntoJob) Job {
+		inner := J(job)
 		return FuncJob(func(ctx context.Context, c *Cron, r JobRun) error {
+			done := make(chan struct{})
+			timer := c.clock.NewTimer(threshold)
+			defer func() {
+				timer.Stop() // Stop synchronously, so the timer cannot fire after the job completed
+				close(done)
+			}()
 			go func() {
-				ctx2, cancel := clockwork.WithTimeout(ctx, c.clock, threshold)
-				defer cancel()
 				select {
-				case <-c.clock.After(threshold):
-				case <-ctx2.Done():
-					if errors.Is(ctx2.Err(), context.DeadlineExceeded) {
-						clb(ctx, c, r, threshold)
-					}
+				case <-timer.Chan(): // Job is still running after "threshold"
+					clb(ctx, c, r, threshold)
+				case <-done:
 				}
 			}()
-			return J(job).Run(ctx, c, r)
+			return inner.Run(ctx, c, r)
 		})
 	}
 }
@@ -586,9 +658,10 @@ func ThresholdClbAsync(threshold time.Duration, j IntoJob, clb ThresholdCallback
 
 func ThresholdClbWrapper(threshold time.Duration, clb ThresholdCallback) JobWrapper {
 	return func(job IntoJob) Job {
+		inner := J(job)
 		return FuncJob(func(ctx context.Context, c *Cron, r JobRun) error {
 			start := c.clock.Now()
-			err := J(job).Run(ctx, c, r)
+			err := inner.Run(ctx, c, r)
 			dur := c.clock.Since(start)
 			if dur > threshold {
 				clb(ctx, c, r, threshold, dur, err)
@@ -606,10 +679,11 @@ func ThresholdClb(threshold time.Duration, j IntoJob, clb ThresholdCallback) Job
 // SkipIfStillRunning skips an invocation of the Job if a previous invocation is still running.
 func SkipIfStillRunning(j IntoJob) Job {
 	var running atomic.Bool
+	inner := J(j)
 	return FuncJob(func(ctx context.Context, c *Cron, r JobRun) (err error) {
 		if running.CompareAndSwap(false, true) {
 			defer running.Store(false)
-			err = J(j).Run(ctx, c, r)
+			err = inner.Run(ctx, c, r)
 		} else {
 			return ErrJobAlreadyRunning
 		}
@@ -622,6 +696,7 @@ func SkipIfStillRunning(j IntoJob) Job {
 // have the delay logged at Info.
 func DelayIfStillRunning(j IntoJob) Job {
 	var mu sync.Mutex
+	inner := J(j)
 	return FuncJob(func(ctx context.Context, c *Cron, r JobRun) (err error) {
 		start := c.clock.Now()
 		mu.Lock()
@@ -629,13 +704,14 @@ func DelayIfStillRunning(j IntoJob) Job {
 		if dur := c.clock.Since(start); dur > time.Minute {
 			c.logger.Info("delay", "entryID", r.Entry.ID, "runID", r.RunID, "duration", dur)
 		}
-		return J(j).Run(ctx, c, r)
+		return inner.Run(ctx, c, r)
 	})
 }
 
 // JitterWrapper add some random delay before running the job
 func JitterWrapper(duration time.Duration) JobWrapper {
 	return func(j IntoJob) Job {
+		inner := J(j)
 		return FuncJob(func(ctx context.Context, c *Cron, r JobRun) error {
 			delay := utils.RandDuration(0, max(duration, 0))
 			select {
@@ -643,7 +719,7 @@ func JitterWrapper(duration time.Duration) JobWrapper {
 			case <-ctx.Done():
 				return ctx.Err()
 			}
-			return J(j).Run(ctx, c, r)
+			return inner.Run(ctx, c, r)
 		})
 	}
 }
@@ -656,10 +732,11 @@ func WithJitter(duration time.Duration, job IntoJob) Job {
 // TimeoutWrapper automatically cancel the job context after a given duration
 func TimeoutWrapper(duration time.Duration) JobWrapper {
 	return func(j IntoJob) Job {
+		inner := J(j)
 		return FuncJob(func(ctx context.Context, c *Cron, r JobRun) error {
 			timeoutCtx, cancel := clockwork.WithTimeout(ctx, c.clock, duration)
 			defer cancel()
-			return J(j).Run(timeoutCtx, c, r)
+			return inner.Run(timeoutCtx, c, r)
 		})
 	}
 }
@@ -672,10 +749,11 @@ func WithTimeout(d time.Duration, job IntoJob) Job {
 
 func DeadlineWrapper(deadline time.Time) JobWrapper {
 	return func(j IntoJob) Job {
+		inner := J(j)
 		return FuncJob(func(ctx context.Context, c *Cron, r JobRun) error {
 			deadlineCtx, cancel := clockwork.WithDeadline(ctx, c.clock, deadline)
 			defer cancel()
-			return J(j).Run(deadlineCtx, c, r)
+			return inner.Run(deadlineCtx, c, r)
 		})
 	}
 }
@@ -693,21 +771,24 @@ func Chain(j IntoJob, wrappers ...JobWrapper) Job {
 	return job
 }
 
-// WithRetryWrapper creates a JobWrapper that retries a job up to maxRetry times
+// WithRetryWrapper creates a JobWrapper that retries a job up to maxRetry times.
+// It waits (attempt * 1s) between attempts, stops retrying when the context is cancelled,
+// and returns the error of the last attempt.
 func WithRetryWrapper(maxRetry int) JobWrapper {
 	return func(job IntoJob) Job {
+		inner := J(job)
 		return FuncJob(func(ctx context.Context, c *Cron, r JobRun) error {
-			for i := 0; i <= maxRetry; i++ {
-				if err := J(job).Run(ctx, c, r); err != nil {
-					select {
-					case <-c.clock.After(time.Duration(i+1) * time.Second):
-					case <-ctx.Done():
-					}
-					continue
+			for i := 0; ; i++ {
+				err := inner.Run(ctx, c, r)
+				if err == nil || i >= maxRetry {
+					return err
 				}
-				break
+				select {
+				case <-c.clock.After(time.Duration(i+1) * time.Second):
+				case <-ctx.Done():
+					return err
+				}
 			}
-			return nil
 		})
 	}
 }
