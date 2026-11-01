@@ -13,7 +13,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/codeyu/cronv5/internal/pubsub"
 	"github.com/codeyu/cronv5/internal/utils"
 
 	"github.com/jonboulle/clockwork"
@@ -1312,39 +1311,19 @@ func NewEventListener(c *Cron, id EntryID) *EventListener {
 		jobPanicCh:     make(chan struct{}, 100),
 		cond:           *sync.NewCond(&sync.Mutex{}),
 	}
-	c1 := make(chan struct{})
-	go func() {
-		sub := c.Sub(id)
-		close(c1)
-		for {
-			var payload pubsub.Payload[EntryID, JobEvent]
-			select {
-			case <-c.ctx().Done():
-				return
-			case payload = <-sub.ReceiveCh():
-			}
-			if payload.Msg.Typ == JobStart {
-				l.nbJobStart.Add(1)
-				utils.NonBlockingSend(l.jobStartCh, struct{}{})
-			} else if payload.Msg.Typ == JobCompleted {
-				l.nbJobCompleted.Add(1)
-				utils.NonBlockingSend(l.jobCompletedCh, struct{}{})
-			} else if payload.Msg.Typ == JobErr {
-				l.nbJobErr.Add(1)
-				utils.NonBlockingSend(l.jobErrCh, struct{}{})
-			} else if payload.Msg.Typ == JobPanic {
-				l.nbJobPanic.Add(1)
-				utils.NonBlockingSend(l.jobPanicCh, struct{}{})
-			}
+	listen := func(evt JobEventType, count *atomic.Int32, ch chan struct{}) {
+		c.OnEntryEvt(id, evt, func(context.Context, *Cron, HookID, JobRun) {
+			count.Add(1)
+			utils.NonBlockingSend(ch, struct{}{})
 			l.cond.L.Lock()
 			l.cond.Signal()
 			l.cond.L.Unlock()
-		}
-	}()
-	select {
-	case <-c1:
-	case <-c.ctx().Done():
+		}, HookSync)
 	}
+	listen(JobStart, &l.nbJobStart, l.jobStartCh)
+	listen(JobCompleted, &l.nbJobCompleted, l.jobCompletedCh)
+	listen(JobErr, &l.nbJobErr, l.jobErrCh)
+	listen(JobPanic, &l.nbJobPanic, l.jobPanicCh)
 	return l
 }
 

@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/codeyu/cronv5/internal/mtx"
-	"github.com/codeyu/cronv5/internal/pubsub"
 	isync "github.com/codeyu/cronv5/internal/sync"
 	"github.com/codeyu/cronv5/internal/utils"
 	"github.com/jonboulle/clockwork"
@@ -41,7 +40,6 @@ type Cron struct {
 	parser               ScheduleParser                               // Parses cron expressions into schedule objects
 	idFactory            IDFactory                                    // Generates a new unique ID for Entry/JobRun/Hook
 	jobRunLoggerFactory  JobRunLoggerFactory                          // Factory for creating loggers for individual job runs
-	ps                   *pubsub.PubSub[EntryID, JobEvent]            // PubSub for publishing and subscribing to job events
 	jobRunCreatedCh      jobRunEvents                                 // Notifications when new job runs are created (see JobRunCreatedCh)
 	jobRunCompletedCh    jobRunEvents                                 // Notifications when job runs complete (see JobRunCompletedCh)
 	keepCompletedRunsDur mtx.Mtx[time.Duration]                       // Duration to keep completed job runs before cleanup (thread-safe)
@@ -147,22 +145,23 @@ type entries struct {
 	entriesMap map[EntryID]*Entry
 }
 
-// ErrHookNotFound ...
+// ErrHookNotFound is returned when a hook ID does not exist
 var ErrHookNotFound = errors.New("hook not found")
 
-// ErrEntryNotFound ...
+// ErrEntryNotFound is returned when an entry ID does not exist
 var ErrEntryNotFound = errors.New("entry not found")
 
-// ErrJobRunNotFound ...
+// ErrJobRunNotFound is returned when a job run ID does not exist (or the completed run was cleaned up)
 var ErrJobRunNotFound = errors.New("job run not found")
 
-// ErrUnsupportedJobType ...
+// ErrUnsupportedJobType is the panic value of J (and AddJob...) for a value that cannot be turned into a Job
 var ErrUnsupportedJobType = errors.New("unsupported job type")
 
-// ErrJobAlreadyRunning ...
+// ErrJobAlreadyRunning is returned when a run is skipped because a previous run is still running
+// (the SkipIfStillRunning wrapper, or Trigger on an entry with NoOverlap)
 var ErrJobAlreadyRunning = errors.New("job already running")
 
-// ErrIDAlreadyUsed ...
+// ErrIDAlreadyUsed is returned when adding an entry with the ID of an existing entry (see WithID)
 var ErrIDAlreadyUsed = errors.New("id already used")
 
 // ErrCronNotRunning is returned by Trigger when the cron is not running
@@ -365,7 +364,6 @@ func (b *Builder) Build() *Cron {
 		parser:               parser,
 		idFactory:            idFactory,
 		jobRunLoggerFactory:  jobRunLoggerFactory,
-		ps:                   pubsub.NewPubSub[EntryID, JobEvent](),
 		keepCompletedRunsDur: mtx.NewMtx(keepCompletedRunsDur),
 		maxCompletedRuns:     b.maxCompletedRuns,
 		maxLogSize:           b.maxLogSize,
@@ -424,14 +422,14 @@ func (c *Cron) OnEntryEvt(entryID EntryID, evt JobEventType, clb HookFn, opts ..
 }
 
 // RemoveHook removes a previously registered hook by its HookID.
-// Works for both global and entry-specific hooks.
-func (c *Cron) RemoveHook(id HookID) { c.removeHook(id) }
+// Works for both global and entry-specific hooks. It returns ErrHookNotFound if the hook does not exist.
+func (c *Cron) RemoveHook(id HookID) error { return c.removeHook(id) }
 
-// EnableHook enables a previously disabled hook by its ID
-func (c *Cron) EnableHook(id HookID) { c.enableHook(id) }
+// EnableHook enables a previously disabled hook by its ID. It returns ErrHookNotFound if the hook does not exist.
+func (c *Cron) EnableHook(id HookID) error { return c.enableHook(id) }
 
-// DisableHook disables a previously enabled hook by its ID
-func (c *Cron) DisableHook(id HookID) { c.disableHook(id) }
+// DisableHook disables a previously enabled hook by its ID. It returns ErrHookNotFound if the hook does not exist.
+func (c *Cron) DisableHook(id HookID) error { return c.disableHook(id) }
 
 // GetHooks returns all registered hooks (both global and entry-specific)
 func (c *Cron) GetHooks() []Hook { return c.getHooks() }
@@ -439,8 +437,8 @@ func (c *Cron) GetHooks() []Hook { return c.getHooks() }
 // GetHook returns a specific hook by ID or ErrHookNotFound if not found
 func (c *Cron) GetHook(id HookID) (Hook, error) { return c.getHook(id) }
 
-// SetHookLabel sets an hook's label
-func (c *Cron) SetHookLabel(id HookID, label string) { c.setHookLabel(id, label) }
+// SetHookLabel sets a hook's label. It returns ErrHookNotFound if the hook does not exist.
+func (c *Cron) SetHookLabel(id HookID, label string) error { return c.setHookLabel(id, label) }
 
 // OnJobStart registers a global hook function for job start events.
 // The hook will be called whenever any job starts.
@@ -503,13 +501,8 @@ func (c *Cron) UpdateScheduleWithSpec(id EntryID, spec string) error {
 	return c.updateScheduleWithSpec(id, spec)
 }
 
-// UpdateLabel updates an entry's label
-func (c *Cron) UpdateLabel(id EntryID, label string) { c.updateLabel(id, label) }
-
-// Sub subscribes to job events for a specific entry ID
-func (c *Cron) Sub(id EntryID) *pubsub.Sub[EntryID, JobEvent] {
-	return c.ps.Subscribe([]EntryID{id})
-}
+// UpdateLabel updates an entry's label. It returns ErrEntryNotFound if the entry does not exist.
+func (c *Cron) UpdateLabel(id EntryID, label string) error { return c.updateLabel(id, label) }
 
 // JobRunCreatedCh returns a channel receiving the job runs when they are created (before they start).
 //
@@ -524,11 +517,13 @@ func (c *Cron) JobRunCreatedCh() <-chan JobRun { return c.jobRunCreatedCh.channe
 // with the same behavior as JobRunCreatedCh (to be notified of every job run, use OnJobCompleted).
 func (c *Cron) JobRunCompletedCh() <-chan JobRun { return c.jobRunCompletedCh.channel() }
 
-// Enable activates a previously disabled cron entry by its ID
-func (c *Cron) Enable(id EntryID) { c.setEntryActive(id, true) }
+// Enable activates a previously disabled cron entry by its ID (enabling an active entry does nothing).
+// It returns ErrEntryNotFound if the entry does not exist.
+func (c *Cron) Enable(id EntryID) error { return c.setEntryActive(id, true) }
 
-// Disable deactivates a previously enabled cron entry by its ID
-func (c *Cron) Disable(id EntryID) { c.setEntryActive(id, false) }
+// Disable deactivates a previously enabled cron entry by its ID (disabling an inactive entry does nothing).
+// It returns ErrEntryNotFound if the entry does not exist.
+func (c *Cron) Disable(id EntryID) error { return c.setEntryActive(id, false) }
 
 // Entries returns a snapshot of the cron entries.
 func (c *Cron) Entries() []Entry { return c.getEntries() }
@@ -538,19 +533,26 @@ func (c *Cron) Entry(id EntryID) (Entry, error) { return c.getEntry(id) }
 
 // Remove an entry from being run in the future.
 // Running jobs of the entry are cancelled, and the hooks specific to the entry are removed.
-func (c *Cron) Remove(id EntryID) { c.remove(id) }
+// It returns ErrEntryNotFound if the entry does not exist.
+func (c *Cron) Remove(id EntryID) error { return c.remove(id) }
 
 // EntriesByTag returns a snapshot of the entries having the given tag, sorted like Entries
 func (c *Cron) EntriesByTag(tag string) []Entry { return c.entriesByTag(tag) }
 
 // RemoveByTag removes the entries having the given tag (as Remove does), and returns how many were removed
-func (c *Cron) RemoveByTag(tag string) int { return c.forEachTagged(tag, c.remove) }
+func (c *Cron) RemoveByTag(tag string) int {
+	return c.forEachTagged(tag, func(id EntryID) { _ = c.remove(id) })
+}
 
 // EnableByTag enables the entries having the given tag, and returns how many entries have the tag
-func (c *Cron) EnableByTag(tag string) int { return c.forEachTagged(tag, c.Enable) }
+func (c *Cron) EnableByTag(tag string) int {
+	return c.forEachTagged(tag, func(id EntryID) { _ = c.Enable(id) })
+}
 
 // DisableByTag disables the entries having the given tag, and returns how many entries have the tag
-func (c *Cron) DisableByTag(tag string) int { return c.forEachTagged(tag, c.Disable) }
+func (c *Cron) DisableByTag(tag string) int {
+	return c.forEachTagged(tag, func(id EntryID) { _ = c.Disable(id) })
+}
 
 // SetTags replaces the tags of an entry. The concurrency limits of the tags (WithTagConcurrencyLimit)
 // apply to the runs started after the change.
@@ -804,7 +806,8 @@ func (c *Cron) onEntryEvt(entryID EntryID, evt JobEventType, clb HookFn, opts ..
 	return hook.id
 }
 
-func (c *Cron) removeHook(id HookID) {
+func (c *Cron) removeHook(id HookID) error {
+	found := false
 	c.hooks.With(func(v *hooksContainer) {
 		for evt, hooks := range v.globalHooksMap {
 			if hook, idx := utils.FindIdx(hooks, func(h *hookStruct) bool { return h.id == id }); idx != -1 {
@@ -813,6 +816,7 @@ func (c *Cron) removeHook(id HookID) {
 				if len(v.globalHooksMap[evt]) == 0 {
 					delete(v.globalHooksMap, evt)
 				}
+				found = true
 				return
 			}
 		}
@@ -827,11 +831,16 @@ func (c *Cron) removeHook(id HookID) {
 					if len(eventMap) == 0 {
 						delete(v.entryHooksMap, entryID)
 					}
+					found = true
 					return
 				}
 			}
 		}
 	})
+	if !found {
+		return ErrHookNotFound
+	}
+	return nil
 }
 
 func (c *Cron) getHooks() (out []Hook) {
@@ -843,12 +852,15 @@ func (c *Cron) getHooks() (out []Hook) {
 	return
 }
 
-func (c *Cron) hookClb(id HookID, clb func(meta hookMeta)) {
+func (c *Cron) hookClb(id HookID, clb func(meta hookMeta)) (err error) {
 	c.hooks.With(func(v *hooksContainer) {
 		if hook, ok := v.hooksMap[id]; ok {
 			clb(hook)
+		} else {
+			err = ErrHookNotFound
 		}
 	})
+	return
 }
 
 func lookupClb[K comparable, V any, M map[K]V](m M, k K, clb func(V)) bool {
@@ -896,16 +908,16 @@ func (c *Cron) getJobRun(entryID EntryID, runID RunID) (out JobRun, err error) {
 	return out, err
 }
 
-func (c *Cron) enableHook(id HookID) {
-	c.hookClb(id, func(hook hookMeta) { (*hook.hook).active = true })
+func (c *Cron) enableHook(id HookID) error {
+	return c.hookClb(id, func(hook hookMeta) { (*hook.hook).active = true })
 }
 
-func (c *Cron) disableHook(id HookID) {
-	c.hookClb(id, func(hook hookMeta) { (*hook.hook).active = false })
+func (c *Cron) disableHook(id HookID) error {
+	return c.hookClb(id, func(hook hookMeta) { (*hook.hook).active = false })
 }
 
-func (c *Cron) setHookLabel(id HookID, label string) {
-	c.hookClb(id, func(hook hookMeta) { (*hook.hook).label = label })
+func (c *Cron) setHookLabel(id HookID, label string) error {
+	return c.hookClb(id, func(hook hookMeta) { (*hook.hook).label = label })
 }
 
 func (c *Cron) onJobStart(clb HookFn, opts ...HookOption) HookID {
@@ -1023,11 +1035,9 @@ func (c *Cron) setTags(id EntryID, tags []string) error {
 	})
 }
 
-func (c *Cron) updateLabel(id EntryID, label string) {
-	c.entries.With(func(entries *entries) {
-		if entry, ok := entries.entriesMap[id]; ok {
-			(*entry).Label = label
-		}
+func (c *Cron) updateLabel(id EntryID, label string) error {
+	return c.entries.WithE(func(entries *entries) error {
+		return lookupErrClb(entries.entriesMap, id, func(entry *Entry) { entry.Label = label }, ErrEntryNotFound)
 	})
 }
 
@@ -1038,7 +1048,7 @@ func (c *Cron) modifyEntry(id EntryID, updateFunc func(entry *Entry) bool) error
 			return ErrEntryNotFound
 		}
 		if updateFunc != nil && !updateFunc(entry) {
-			return errors.New("not changed")
+			return errNotChanged
 		}
 		now := c.now()
 		newNext := utils.Ternary(updateFunc == nil, now, entry.Schedule.Next(now))
@@ -1047,7 +1057,9 @@ func (c *Cron) modifyEntry(id EntryID, updateFunc func(entry *Entry) bool) error
 		(*entry).pinnedNext = updateFunc == nil // RunNow must survive a Start
 		_ = entries.heap.Update(id, newNext)
 		return nil
-	}); err != nil {
+	}); errors.Is(err, errNotChanged) {
+		return nil
+	} else if err != nil {
 		return err
 	}
 	if updateFunc == nil {
@@ -1110,8 +1122,11 @@ func (c *Cron) trigger(id EntryID) (RunID, error) {
 	return jobRun.runID, nil
 }
 
-func (c *Cron) setEntryActive(id EntryID, active bool) {
-	_ = c.modifyEntry(id, func(entry *Entry) (updated bool) {
+// errNotChanged is returned by the updateFunc of modifyEntry when nothing changed
+var errNotChanged = errors.New("not changed")
+
+func (c *Cron) setEntryActive(id EntryID, active bool) error {
+	return c.modifyEntry(id, func(entry *Entry) (updated bool) {
 		if updated = entry.Active != active; updated {
 			entry.Active = active
 		}
@@ -1329,21 +1344,26 @@ func (c *Cron) refreshStaleEntries() {
 	c.reportSkipped(skipped)
 }
 
-func (c *Cron) remove(id EntryID) {
-	c.removeKeepRun(id, "")
+func (c *Cron) remove(id EntryID) error {
+	return c.removeKeepRun(id, "")
 }
 
 // removeKeepRun removes an entry and cancels all of its running jobs, except the run "keepRunID".
 // This is used by jobs that remove their own entry (Once, N) without cancelling themselves.
-func (c *Cron) removeKeepRun(id EntryID, keepRunID RunID) {
-	c.removeEntry(id, keepRunID)
+func (c *Cron) removeKeepRun(id EntryID, keepRunID RunID) error {
+	if !c.removeEntry(id, keepRunID) {
+		return ErrEntryNotFound
+	}
 	c.entriesUpdated() // remove
+	return nil
 }
 
-func (c *Cron) removeEntry(id EntryID, keepRunID RunID) {
+// removeEntry removes the entry, and returns false if it did not exist
+func (c *Cron) removeEntry(id EntryID, keepRunID RunID) (found bool) {
 	// Job runs are registered while holding the entries lock (see runDueEntries),
 	// so no new run can be registered for this entry once we are done here.
 	c.entries.With(func(entries *entries) {
+		_, found = entries.entriesMap[id]
 		delete(entries.entriesMap, id)
 		entries.heap.Remove(id)
 		if jobRuns, ok := c.runningJobsMap.LoadAndDelete(id); ok {
@@ -1357,6 +1377,7 @@ func (c *Cron) removeEntry(id EntryID, keepRunID RunID) {
 		}
 	})
 	c.hooks.With(func(v *hooksContainer) { v.removeEntryHooks(id) })
+	return found
 }
 
 func (c *Cron) getEntries() (out []Entry) {
@@ -1583,7 +1604,6 @@ func makeEventErr(c *Cron, jobRun *jobRunStruct, typ JobEventType, err error) {
 		utils.ApplyOptions(inner, opt)
 		inner.addEvent(evt)
 	})
-	c.ps.Pub(jobRun.entry.ID, evt)
 	// Hooks receive the cron context, the job context is cancelled as soon as the job completes,
 	// which would break async hooks.
 	triggerHooks(c, jobRun.cronCtx, jobRun, typ)

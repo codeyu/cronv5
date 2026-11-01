@@ -64,6 +64,7 @@ func (e Entry) HasTag(tag string) bool {
 	return slices.Contains(e.Tags, tag)
 }
 
+// EntryOption configures an entry when it is added (AddJob, Schedule, AddJobAt...)
 type EntryOption func(*Cron, *Entry)
 
 // WithTags adds tags to the entry, to query or manage entries by group
@@ -86,25 +87,30 @@ func mergeTags(a, b []string) []string {
 	return out
 }
 
-func Label(label string) func(*Cron, *Entry) {
+// Label sets the label of the entry, to describe it (see UpdateLabel)
+func Label(label string) EntryOption {
 	return func(_ *Cron, entry *Entry) {
 		entry.Label = label
 	}
 }
 
-func WithID(id EntryID) func(*Cron, *Entry) {
+// WithID sets the ID of the entry, instead of a generated one (AddJob returns ErrIDAlreadyUsed if it is used)
+func WithID(id EntryID) EntryOption {
 	return func(_ *Cron, entry *Entry) {
 		entry.ID = id
 	}
 }
 
-func WithNext(next time.Time) func(*Cron, *Entry) {
+// WithNext sets the first activation time of the entry, the schedule is used for the next ones.
+// The time is kept if the cron is started after it: the job then runs when the cron starts.
+func WithNext(next time.Time) EntryOption {
 	return func(_ *Cron, entry *Entry) {
 		entry.Next = next
 		entry.pinnedNext = true
 	}
 }
 
+// RunOnStart runs the job as soon as the entry is added (or the cron is started), then on its schedule
 func RunOnStart(c *Cron, entry *Entry) {
 	entry.Next = c.now()
 	entry.pinnedNext = true
@@ -119,6 +125,7 @@ func NoOverlap(_ *Cron, entry *Entry) {
 	entry.NoOverlap = true
 }
 
+// Disabled adds the entry disabled, it does not run until it is enabled (see Enable)
 func Disabled(_ *Cron, entry *Entry) {
 	entry.Active = false
 }
