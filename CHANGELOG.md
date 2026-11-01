@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   They can be listed with other items, eg: `0 0 1,15,L * *`. Specs using them were rejected before.
 - **Day of week `7` is Sunday**, as in Vixie cron (`5-7` is Friday to Sunday).
+- **One-time jobs**: `Cron.AddJobAt(t, job)` runs a job once at the given time, then removes its entry.
+  A past time runs as soon as possible, including when the cron is started after it. The `At(t)`
+  schedule (`AtSchedule`) activates once.
 - **`Cron.Trigger(id)`** runs the job of an entry now and returns the `RunID` of the run, to follow it
   with `GetJobRun`, `CancelJobRun`... It does not change the entry's schedule, runs disabled entries
   too, and returns the new `ErrCronNotRunning` when the cron is not running.

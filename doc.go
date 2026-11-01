@@ -142,6 +142,15 @@ You may use one of several pre-defined schedules in place of a cron expression.
 	@daily (or @midnight)  | Run once a day, midnight                   | 0 0 * * *
 	@hourly                | Run once an hour, beginning of hour        | 0 * * * *
 
+# One-time jobs
+
+AddJobAt runs a job once, at a given time, then removes its entry:
+
+	id, err := c.AddJobAt(time.Now().Add(2*time.Hour), func() { ... })
+
+A time already past runs as soon as possible, and a time that went by while the cron was not
+running runs when it starts. The At schedule (activating once) can also be used on its own.
+
 # Activation times
 
 The activation times of a schedule can be listed without running it:

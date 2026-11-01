@@ -126,7 +126,7 @@
 | 2 | **F8 DST 处理**（按正确性问题处理）：采用 Vixie cron 规则——固定时刻任务在春季跳变时于跳变结束时执行一次、秋季回拨只执行第一次；间隔型任务（秒/分/时字段以 `*` 开头）跟随真实时间 — rc#541 | [x] |
 | 3 | **F6 `SpecSchedule.Prev()`、`NextN` / `Activations`（`iter.Seq`）、`Cron.NextActivations`** — rc#322、rc#361、rc#224 | [x] |
 | 4 | **F16 `Trigger(id) (RunID, error)`**：wrapper 本来就会生效（wrapper 包在 job 里），实际问题是 `RunNow` 不返回 RunID、会改写 `Next`（`@every` 相位被重置）、对禁用的 entry 静默不执行；`Entry.Job()` 补充文档 — rc#551 | [x] |
-| 5 | **F11 指定时间点的一次性任务 `At(time.Time)`** — rc#441、rc#302 | [ ] |
+| 5 | **F11 一次性任务 `AddJobAt(t, job)` / `At(t)` schedule**（过去的时间尽快执行，cron 未运行期间错过的在 Start 时执行）— rc#441、rc#302 | [x] |
 | 6 | **F13 错过执行的补偿策略**：休眠/阻塞后"跳过 / 补跑一次 / 全部补跑" | [ ] |
 | 7 | **F14 `WithRetry` 指数退避 + 抖动 + 自定义重试判断** — rc#560 | [ ] |
 | 8 | **F15 并发限制**（全局 / 按标签），`SkipIfStillRunning` 可作为 EntryOption — rc#430、rc#285 | [ ] |

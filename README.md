@@ -8,6 +8,7 @@ Jobs ID are string and can have user specified ID
 Job run have a dedicated logger that can be use to keep logs for a specific run  
 Can add hooks callback to global JobEvent or entry specific events  
 Can have a job that only run once using cron.Once  
+Can run a job once at a given time with `c.AddJobAt(t, job)`  
 Can change the *time.Location while running  
 Cron specs support `L`, `L-n`, `LW`, `15W` (day of month), `MON#2`, `5L` (day of week), `7` as Sunday and wrapping ranges (`FRI-MON`)  
 List the next activation times with `cron.NextN(schedule, t, n)` / `c.NextActivations(id, n)`, and the previous one with `SpecSchedule.Prev`  
