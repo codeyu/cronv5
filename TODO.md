@@ -1,12 +1,12 @@
 # cronv5 Review & TODO
 
-> 审查范围：`cron.go` / `job.go` / `job_run.go` / `entry.go` / `entry_heap.go` / `parser.go` / `spec.go` / `webadmin/` / `internal/`
+> 审查范围：`cron.go` / `job.go` / `job_run.go` / `entry.go` / `entry_heap.go` / `parser.go` / `spec.go` / `internal/`（`webadmin/` 已移除）
 > 参考来源：[robfig/cron](https://github.com/robfig/cron) 的 issues / PRs（按 👍 和讨论数排序）
 > 标注说明：✅ = 已写复现测试确认；🔍 = 代码阅读确认；`rc#N` = robfig/cron 对应 issue/PR 编号
 
 ---
 
-## P0 — 已确认的 Bug（✔ 已全部修复，回归测试见 `regression_test.go`、`webadmin/main_test.go`）
+## P0 — 已确认的 Bug（✔ 已全部修复，回归测试见 `regression_test.go`）
 
 - [x] **B1 `Once()` / `N()` 在执行前就把自己的 ctx 取消了** ✅
   `job.go:533` `Once` 先调用 `c.Remove(id)`，而 `removeEntry`（`cron.go:961`）会 cancel 该 entry 所有正在运行的 run —— 包括当前这次。
@@ -70,7 +70,7 @@
   `cron.go:796` 先 `entryExists`（读锁）再写锁插入；并发 `AddJob(WithID(x))` 可能都成功，后者覆盖 map 但 heap `Push` 被忽略 → map 与 heap 不一致。
   修复：在同一把写锁内检查 + 插入；并校验 `job`/`Schedule` 非 nil。
 
-- [x] **B15 webadmin 存储型 XSS** 🔍
+- [x] **B15 webadmin 存储型 XSS** 🔍（webadmin 已整体移除）
   `webadmin/templates/run.gohtml:13`：`{{ .JobRun.Logs | Nl2br | Safe }}` 把 job 日志原样作为 HTML 输出。日志中含外部数据（URL、错误信息）即可注入脚本。
   修复：先 `html.EscapeString` 再换行，或用 CSS `white-space: pre-wrap` 去掉 `Safe`。另：POST 接口无 CSRF 防护。
 

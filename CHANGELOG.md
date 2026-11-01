@@ -5,6 +5,15 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Removed
+
+- **The `webadmin` package was removed.** It was the only part of the module serving HTTP, and keeping it
+  secure (XSS, CSRF, authentication) is out of scope for a scheduling library. The data it displayed is
+  still available through the exported API (`Entries`, `RunningJobs`, `CompletedJobs`, hooks...), so an
+  admin page can be built on top of it in the application.
+
 ## [v0.2.0] - 2026-10-30
 
 This release fixes a number of concurrency bugs, adds graceful shutdown and memory limits,

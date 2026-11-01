@@ -13,7 +13,6 @@ Do not sort all entries at every iteration
 Use Heap data structure to store entries  
 Can ask the cron object if a job is currently running with `isRunning := c.IsRunning(entryID)`  
 Tests runs in under a second (instead of over a minute)  
-Comes with a complete admin web interface built-in  
 
 Built in job wrapper:  
 ```go
@@ -37,9 +36,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/codeyu/cronv5"
-	"github.com/codeyu/cronv5/webadmin"
 	"log/slog"
-	"net/http"
 	"os"
 	"time"
 )
@@ -244,11 +241,8 @@ func main() {
 	// It is possible to update the schedule of a job while the application is running
 	_ = c.UpdateScheduleWithSpec(useLoggerID, "*/10 * * * * *")
 	
-	// This library comes with a complete web interface administration tool (optional)
-	mux := webadmin.GetMux(c)
-	if err := http.ListenAndServe(":8080", mux); err != nil {
-		panic(err)
-	}
+	// Block forever (in a real application, wait for a shutdown signal and call c.Stop())
+	select {}
 }
 
 ```
