@@ -164,3 +164,44 @@ func TestBaseMetricsDoNothing(t *testing.T) {
 	m.JobCompleted(JobRun{}, 0)
 	m.JobSkipped(Entry{}, time.Time{}, SkipMisfire)
 }
+
+func TestWithOptionalSeconds(t *testing.T) {
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	parse := func(b *Builder, spec string) ([]time.Time, error) {
+		c := b.WithLogger(newNoOpLogger()).Build()
+		sched, err := c.parser.Parse(spec)
+		if err != nil {
+			return nil, err
+		}
+		return NextN(sched, from, 2), nil
+	}
+	at := func(h, m, s int) []time.Time {
+		return []time.Time{time.Date(2026, 1, 1, h, m, s, 0, time.UTC), time.Date(2026, 1, 2, h, m, s, 0, time.UTC)}
+	}
+
+	// 5 fields: no seconds, as by default
+	got, err := parse(New().WithOptionalSeconds(), "TZ=UTC 0 9 * * *")
+	assert.NoError(t, err)
+	assert.Equal(t, at(9, 0, 0), got)
+	// 6 fields: seconds first
+	got, err = parse(New().WithOptionalSeconds(), "TZ=UTC 30 0 9 * * *")
+	assert.NoError(t, err)
+	assert.Equal(t, at(9, 0, 30), got)
+	// Descriptors
+	got, err = parse(New().WithOptionalSeconds(), "TZ=UTC @every 10s")
+	assert.NoError(t, err)
+	assert.Equal(t, []time.Time{from.Add(10 * time.Second), from.Add(20 * time.Second)}, got)
+	// Too few or too many fields
+	for _, spec := range []string{"* * * *", "* * * * * * *"} {
+		_, err = parse(New().WithOptionalSeconds(), spec)
+		assert.Error(t, err, spec)
+	}
+
+	// The pitfall of WithSeconds: a 5 fields spec has seconds first
+	got, err = parse(New().WithSeconds(), "TZ=UTC 0 9 * * *")
+	assert.NoError(t, err)
+	assert.Equal(t, []time.Time{time.Date(2026, 1, 1, 0, 9, 0, 0, time.UTC), time.Date(2026, 1, 1, 1, 9, 0, 0, time.UTC)}, got)
+	// And the default rejects 6 fields
+	_, err = parse(New(), "TZ=UTC 30 0 9 * * *")
+	assert.Error(t, err)
+}

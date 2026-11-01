@@ -279,9 +279,23 @@ func (b *Builder) WithParser(parser ScheduleParser) *Builder {
 	return b
 }
 
-// WithSeconds configures the parser to include seconds in the schedule specification.
+// WithSeconds configures the parser to include seconds in the schedule specification:
+// a mandatory seconds field comes first ("30 0 9 * * *" is 9:00:30), and the day of week
+// field becomes optional.
+//
+// Beware that a 5 fields spec is then read as "second minute hour day-of-month month": "0 9 * * *"
+// is every hour at minute 9, not 9:00. To accept both 5 fields specs (without seconds) and
+// 6 fields specs (with seconds), use WithOptionalSeconds.
 func (b *Builder) WithSeconds() *Builder {
 	b.parser = SecondParser
+	return b
+}
+
+// WithOptionalSeconds configures the parser to accept an optional seconds field: a 5 fields
+// spec is "minute hour day-of-month month day-of-week" as by default ("0 9 * * *" is 9:00),
+// and a 6 fields spec has a seconds field first ("30 0 9 * * *" is 9:00:30).
+func (b *Builder) WithOptionalSeconds() *Builder {
+	b.parser = optionalSecondParser
 	return b
 }
 

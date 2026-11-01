@@ -49,11 +49,14 @@ was not running are rescheduled, instead of all running at once when the cron st
 
 A cron expression represents a set of times, using 5 space-separated fields.
 When the cron is built with WithSeconds, a mandatory seconds field is added in first position,
-and the day of week field becomes optional.
+and the day of week field becomes optional. A 5 fields spec is then read as "second minute hour
+day-of-month month": "0 9 * * *" is every hour at minute 9, not 9:00. WithOptionalSeconds accepts
+both: 5 fields specs without seconds ("0 9 * * *" is 9:00), and 6 fields specs with seconds first
+("30 0 9 * * *" is 9:00:30).
 
 	Field name   | Mandatory? | Allowed values  | Allowed special characters
 	----------   | ---------- | --------------  | --------------------------
-	Seconds      | WithSeconds| 0-59            | * / , -
+	Seconds      | See above  | 0-59            | * / , -
 	Minutes      | Yes        | 0-59            | * / , -
 	Hours        | Yes        | 0-23            | * / , -
 	Day of month | Yes        | 1-31            | * / , - ? L W

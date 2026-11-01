@@ -272,6 +272,11 @@ var standardParser = NewParser(
 	Minute | Hour | Dom | Month | Dow | Descriptor,
 )
 
+// optionalSecondParser accepts 5 fields specs (without seconds) and 6 fields specs (seconds first)
+var optionalSecondParser = NewParser(SecondOptional | Minute | Hour | Dom | Month | Dow | Descriptor)
+
+// SecondParser parses specs with a mandatory seconds field first, and an optional day of week
+// field (see Builder.WithSeconds).
 var SecondParser = NewParser(Second | Minute | Hour | Dom | Month | DowOptional | Descriptor)
 
 // ParseStandard returns a new crontab schedule representing the given

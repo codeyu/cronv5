@@ -104,7 +104,21 @@ func main() {
 * * * * *
 ```
 
-With `cron.New().WithSeconds()`, a seconds field (0-59) comes first, and the day of week becomes optional.
+There is no seconds field by default. For jobs every few seconds, `@every 10s` works with the default format.
+To add a seconds field (0-59), in first position:
+
+| Builder | `0 9 * * *` (5 fields) | `30 0 9 * * *` (6 fields) |
+|---|---|---|
+| `cron.New()` (default) | 9:00 every day | error: expected exactly 5 fields |
+| `cron.New().WithOptionalSeconds()` | 9:00 every day | 9:00:30 every day |
+| `cron.New().WithSeconds()` | ⚠️ minute 9 of **every hour** | 9:00:30 every day |
+
+> [!WARNING]
+> With `WithSeconds()`, the seconds field is mandatory and the day of week becomes optional, so a 5 fields
+> spec does not fail: it is read as `second minute hour day-of-month month`. When switching an existing
+> cron to `WithSeconds()`, add a seconds field to all its specs, or use `WithOptionalSeconds()`, which
+> reads 5 fields specs as before.
+
 Names are case insensitive (`MON`, `Mon`, `mon`).
 
 | Character | Fields | Meaning | Example |
@@ -434,6 +448,7 @@ func TestNightlyJob(t *testing.T) {
 | | robfig/cron v3 | cronv5 |
 |---|---|---|
 | Create | `cron.New(cron.WithSeconds())` | `cron.New().WithSeconds().Build()` |
+| Optional seconds | `cron.WithParser(cron.NewParser(cron.SecondOptional \| ...))` | `cron.New().WithOptionalSeconds()` |
 | Add a job | `c.AddFunc(spec, func())` | `c.AddJob(spec, func())` (and many other signatures) |
 | Entry IDs | `int` | `string`, `cron.WithID` to choose it |
 | Per run context, logger, history | no | yes |

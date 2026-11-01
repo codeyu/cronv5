@@ -107,6 +107,9 @@ Introspection:
   scheduled time, `JobCompleted` with the duration, `JobSkipped` with a `SkipReason`), and `BaseMetrics` to embed
   in implementations. `JobRun.ScheduledAt` is the activation time a run is for, `JobRun.Triggered` tells if it was
   started by `Trigger` / `RunNow`.
+- `Builder.WithOptionalSeconds()`: accepts 5 fields specs (without seconds, `0 9 * * *` is 9:00) and 6 fields
+  specs (seconds first, `30 0 9 * * *` is 9:00:30). Unlike `WithSeconds()`, which reads a 5 fields spec as
+  `second minute hour day-of-month month` (`0 9 * * *` is minute 9 of every hour), as documented now.
 - `JobRunEventsBuffer`, the buffer size of the job run channels.
 - Documentation: daylight saving time, missed activations, concurrency, one-time jobs, activation times, the first
   run of `@every`, and embedding the tz database (`import _ "time/tzdata"`).
