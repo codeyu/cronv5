@@ -12,11 +12,16 @@ Can run a job once at a given time with `c.AddJobAt(t, job)`
 Can change the *time.Location while running  
 Cron specs support `L`, `L-n`, `LW`, `15W` (day of month), `MON#2`, `5L` (day of week), `7` as Sunday and wrapping ranges (`FRI-MON`)  
 List the next activation times with `cron.NextN(schedule, t, n)` / `c.NextActivations(id, n)`, and the previous one with `SpecSchedule.Prev`  
+Entries can have tags: `cron.WithTags("billing")`, then `c.EntriesByTag` / `RemoveByTag` / `EnableByTag` / `DisableByTag`  
+Misfire policies for the activations missed while stopped or late: `cron.WithMisfirePolicy(cron.MisfireRunAll)`  
+Concurrency limits: `WithMaxConcurrentJobs(n)`, `WithTagConcurrencyLimit(tag, n)` and the `cron.NoOverlap` entry option  
+Metrics hooks (Prometheus friendly) with `WithMetrics(m)`, `JobRun.ScheduledAt`  
+Daylight saving time handled like Vixie cron, time zones as UTC offsets (`TZ=UTC+8`)  
 Do not sort all entries at every iteration  
 Use Heap data structure to store entries  
 Can run a job now with `runID, err := c.Trigger(entryID)`, without changing its schedule  
 Can ask the cron object if a job is currently running with `isRunning := c.IsRunning(entryID)`  
-Tests runs in under a second (instead of over a minute)  
+Tests use a fake clock and run in a few seconds (instead of over a minute)  
 
 Built in job wrapper:  
 ```go

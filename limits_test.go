@@ -233,3 +233,52 @@ func TestNoOverlapRunAll(t *testing.T) {
 	defer mu.Unlock()
 	assert.Equal(t, []time.Time{start.Add(time.Minute)}, slices.Clone(scheduled))
 }
+
+// Metrics of a run cancelled while waiting: completed (with no duration), never started
+func TestConcurrencyLimitCancelledWhileWaitingMetrics(t *testing.T) {
+	metrics := &testMetrics{}
+	cron, _ := newRegressionCron(func(b *Builder) { b.WithMaxConcurrentJobs(1).WithMetrics(metrics) })
+	cron.Start()
+	defer cron.Stop()
+	probe := newConcurrencyProbe()
+	blocking, _ := cron.AddJob("0 0 0 1 1 *", probe.job, WithID("blocking"))
+	_, _ = cron.Trigger(blocking)
+	assert.Eventually(t, func() bool { return probe.current.Load() == 1 }, time.Second, time.Millisecond)
+	waiting, _ := cron.AddJob("0 0 0 1 1 *", func() {}, WithID("waiting"))
+	runID, _ := cron.Trigger(waiting)
+	cron.Remove(waiting) // cancels the waiting run
+	close(probe.release)
+	cron.waitAllJobsCompleted()
+	var kinds []string
+	for _, m := range metrics.get() {
+		if m.entryID == "waiting" {
+			kinds = append(kinds, m.kind)
+			assert.Equal(t, runID, m.run.RunID)
+			assert.ErrorIs(t, m.run.Error, context.Canceled)
+			assert.Equal(t, time.Duration(0), m.dur)
+		}
+	}
+	assert.Equal(t, []string{"completed"}, kinds)
+}
+
+// A run cancelled before it waits for a free slot does not start (select would pick randomly)
+func TestConcurrencyLimitCancelledBeforeAcquire(t *testing.T) {
+	limits := newConcurrencyLimits(1, map[string]int{"a": 1})
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	for i := 0; i < 100; i++ {
+		_, err := limits.acquire(ctx, []string{"a"})
+		assert.ErrorIs(t, err, context.Canceled)
+	}
+	// No slot leaked
+	release, err := limits.acquire(context.Background(), []string{"a"})
+	assert.NoError(t, err)
+	release()
+	release, err = limits.acquire(context.Background(), []string{"a", "a"})
+	assert.NoError(t, err)
+	release()
+	// No limit: nothing to wait for
+	release, err = newConcurrencyLimits(0, nil).acquire(ctx, nil)
+	assert.NoError(t, err)
+	release()
+}

@@ -22,6 +22,8 @@ func TestPrev(t *testing.T) {
 		{"Asia/Tokyo", "30 2 * * *", "2026-03-08 02:00 +0900", "2026-03-07 02:30 +0900"},
 		// Spring forward: a fixed time runs at the end of the jump.
 		{"America/New_York", "30 2 * * *", "2026-03-08 04:00 -0400", "2026-03-08 03:00 -0400"},
+		{"America/New_York", "30 2 * * *", "2026-03-08 03:00 -0400", "2026-03-07 02:30 -0500"}, // strictly before
+		{"America/New_York", "30 2 * * *", "2026-03-08 03:01 -0400", "2026-03-08 03:00 -0400"},
 		{"America/New_York", "30 * * * *", "2026-03-08 03:20 -0400", "2026-03-08 01:30 -0500"},
 		// Fall back: a fixed time runs the first time only, an interval both times.
 		{"America/New_York", "30 1 * * *", "2026-11-01 01:45 -0500", "2026-11-01 01:30 -0400"},
@@ -222,6 +224,12 @@ func TestCronNextActivations(t *testing.T) {
 	got, err = cron.NextActivations(id, 0)
 	assert.NoError(t, err)
 	assert.Empty(t, got)
+
+	// A disabled entry has no next activation time: the activations of its schedule from now
+	id3, _ := cron.AddJob("0 0 12 * * *", func() {}, Disabled)
+	got, err = cron.NextActivations(id3, 1)
+	assert.NoError(t, err)
+	assert.Equal(t, []time.Time{time.Date(2000, 1, 1, 12, 0, 0, 0, tokyo)}, got)
 
 	_, err = cron.NextActivations("unknown", 3)
 	assert.ErrorIs(t, err, ErrEntryNotFound)

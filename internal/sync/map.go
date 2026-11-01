@@ -2,7 +2,6 @@ package sync
 
 import (
 	"iter"
-	"slices"
 	"sync"
 )
 
@@ -88,12 +87,6 @@ func (m *Map[K, V]) RangeValues(f func(value V) bool) {
 	})
 }
 
-func (m *Map[K, V]) Iter() iter.Seq2[K, V] {
-	return func(yield func(K, V) bool) {
-		m.Range(yield)
-	}
-}
-
 func (m *Map[K, V]) IterKeys() iter.Seq[K] {
 	return func(yield func(K) bool) {
 		m.RangeKeys(yield)
@@ -104,14 +97,6 @@ func (m *Map[K, V]) IterValues() iter.Seq[V] {
 	return func(yield func(V) bool) {
 		m.RangeValues(yield)
 	}
-}
-
-func (m *Map[K, V]) Keys() (out []K) {
-	return slices.Collect(m.IterKeys())
-}
-
-func (m *Map[K, V]) Values() (out []V) {
-	return slices.Collect(m.IterValues())
 }
 
 func (m *Map[K, V]) Clear() {

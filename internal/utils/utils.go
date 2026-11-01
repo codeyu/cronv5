@@ -1,16 +1,12 @@
 package utils
 
 import (
-	"context"
 	cryptoRand "crypto/rand"
 	"encoding/hex"
 	"io"
 	"iter"
 	"math/rand/v2"
 	"reflect"
-	"runtime"
-	"strings"
-	"sync"
 	"time"
 
 	"github.com/codeyu/cronv5/internal/core"
@@ -138,13 +134,6 @@ func SliceSeq[T any](s []T) iter.Seq[T] {
 	}
 }
 
-// Find looks through each value in the list, returning the first one that passes a truth test (predicate),
-// or nil if no value passes the test.
-// The function returns as soon as it finds an acceptable element, and doesn't traverse the entire list
-func Find[T any](arr []T, predicate func(T) bool) (out *T) {
-	return FindIter(SliceSeq(arr), predicate)
-}
-
 // FindIter ...
 func FindIter[T any](it iter.Seq[T], predicate func(T) bool) (out *T) {
 	return First(FindIdxIter(it, predicate))
@@ -193,33 +182,6 @@ func NonBlockingSend[T any](c chan T, el T) {
 	}
 }
 
-// ShortDur ...
-func ShortDur(v any) string {
-	if d, ok := v.(time.Duration); ok {
-		s := d.Abs().Round(time.Second).String()
-		if strings.HasSuffix(s, "m0s") || strings.HasSuffix(s, "h0m") {
-			s = s[:len(s)-2]
-		}
-		s += Ternary(d < 0, " ago", " from now")
-		return s
-	} else if d, ok := v.(time.Time); ok {
-		return ShortDur(time.Until(d))
-	} else if d, ok := v.(uint64); ok {
-		return ShortDur(time.Duration(d) * time.Second)
-	} else if d, ok := v.(int64); ok {
-		return ShortDur(time.Duration(d) * time.Second)
-	} else if d, ok := v.(int32); ok {
-		return ShortDur(time.Duration(d) * time.Second)
-	} else if d, ok := v.(int64); ok {
-		return ShortDur(time.Duration(d) * time.Second)
-	} else if d, ok := v.(float32); ok {
-		return ShortDur(time.Duration(d) * time.Second)
-	} else if d, ok := v.(float64); ok {
-		return ShortDur(time.Duration(d) * time.Second)
-	}
-	return "n/a"
-}
-
 // UuidV4 generates a new UUID v4
 func UuidV4() (uuid [16]byte) {
 	_, _ = io.ReadFull(cryptoRand.Reader, uuid[:])
@@ -238,43 +200,4 @@ func UuidV4Str() string {
 	hex.Encode(buf[16:20], uuid[8:10])
 	hex.Encode(buf[20:], uuid[10:])
 	return string(buf[:])
-}
-
-// ParallelForEach ...
-func ParallelForEach[T any](ctx context.Context, s iter.Seq[T], workerCount int, fn func(T)) {
-	if workerCount <= 0 {
-		workerCount = runtime.NumCPU()
-	}
-	var wg sync.WaitGroup
-	ch := make(chan T, workerCount*2) // Buffered channel for pipelining
-	// Worker pool
-	wg.Add(workerCount)
-	for i := 0; i < workerCount; i++ {
-		go func() {
-			defer wg.Done()
-			for {
-				select {
-				case item, ok := <-ch:
-					if ok {
-						fn(item)
-					} else {
-						return
-					}
-				case <-ctx.Done():
-					return
-				}
-			}
-		}()
-	}
-	// Feed items to workers
-loop:
-	for item := range s {
-		select {
-		case ch <- item:
-		case <-ctx.Done():
-			break loop
-		}
-	}
-	close(ch)
-	wg.Wait()
 }

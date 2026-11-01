@@ -74,13 +74,23 @@ func (l concurrencyLimits) acquire(ctx context.Context, tags []string) (release 
 		}
 	}
 	for i, sem := range sems {
+		// Checked first: select picks randomly when a slot is free and the context is cancelled
+		if err := ctx.Err(); err != nil {
+			sems = sems[:i] // release the acquired slots only
+			release()
+			return nil, err
+		}
 		select {
 		case sem <- struct{}{}:
 		case <-ctx.Done():
-			sems = sems[:i] // release the acquired slots only
+			sems = sems[:i]
 			release()
 			return nil, ctx.Err()
 		}
+	}
+	if err := ctx.Err(); len(sems) > 0 && err != nil { // Cancelled while the last slot was acquired
+		release()
+		return nil, err
 	}
 	return release, nil
 }

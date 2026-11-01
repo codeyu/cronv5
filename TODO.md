@@ -116,7 +116,7 @@
 | CompletedJobs（1000 runs） | 2.5 ms / 2512 allocs | 2.1 ms / 1512 allocs | 1.2× |
 | Dispatch（一次触发 1000 个 job） | 8.6 ms / 34 allocs/job | 8.4 ms / 30 allocs/job | ≈1× |
 
-## P3 — 新功能路线图（最多 10 项，做完发布 v1.0 并冻结 API）
+## P3 — 新功能路线图（✔ 已全部完成，下一步发布 v1.0 并冻结 API）
 
 表达式目标：**兼容 Vixie cron（Linux crontab），并支持 Quartz 的 `L` / `W` / `#`**。不追求"全支持"所有方言：星期仍按 Vixie 编号（0/7 = 周日），不采用 Quartz 的 1 = 周日。
 
@@ -148,7 +148,11 @@
 - **F19** 持久化 / 分布式锁：范围太大且绑定存储；最多只定义 `Locker` 接口，由用户实现 — rc#214、rc#428
 - **webadmin**：已移除，安全维护（XSS / CSRF / 认证）不属于调度库的职责
 
+测试补充（完成路线图后）：为原本没有测试的公开 API 补测试（`Chain`、`DelayIfStillRunning`、`WithJitter`、`ThresholdClb`、`WithSeconds`），补充功能组合场景（tag 限流 + `SetTags`、`MisfireRunAll` 跨 DST、`Trigger` + 并发限制），删除 webadmin 移除后的死代码（`ShortDur`、`ParallelForEach` 等）。压力测试 `go test -race -count=15 -shuffle=on ./...` 通过；主包覆盖率 98%+。
+
 ## P4 — v1.0 之后：长期维护
+
+- [ ] `TestJobRunEvents` 偶发失败（v0.2.0 起就存在）：`JobRunCreatedCh` / `JobRunCompletedCh` 是无缓冲 channel + 非阻塞发送，事件大多被丢弃。
 
 - bug 修复与性能优化为主，严格遵循语义化版本。
 - **时区数据**：各国夏令时政策会变，`doc.go` 已说明可 `import _ "time/tzdata"` 内嵌时区数据；DST 回归测试（`spec_dst_test.go`）已内嵌 tzdata。

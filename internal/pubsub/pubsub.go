@@ -101,17 +101,6 @@ func (s *Sub[T, P]) ReceiveTimeout(timeout time.Duration) (topic T, msg P, err e
 	return s.ReceiveTimeout2(timeout, c1)
 }
 
-// Receive returns a message
-func (s *Sub[T, P]) Receive() (topic T, msg P, err error) {
-	var res P
-	select {
-	case p := <-s.ch:
-		return p.Topic, p.Msg, nil
-	case <-s.ctx.Done():
-		return topic, res, ErrCancelled
-	}
-}
-
 // ReceiveCh returns a message
 func (s *Sub[T, P]) ReceiveCh() <-chan Payload[T, P] {
 	return s.ch
