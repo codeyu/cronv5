@@ -150,6 +150,12 @@
 
 测试补充（完成路线图后）：为原本没有测试的公开 API 补测试（`Chain`、`DelayIfStillRunning`、`WithJitter`、`ThresholdClb`、`WithSeconds`），补充功能组合场景（tag 限流 + `SetTags`、`MisfireRunAll` 跨 DST、`Trigger` + 并发限制），删除 webadmin 移除后的死代码（`ShortDur`、`ParallelForEach` 等）。压力测试 `go test -race -count=15 -shuffle=on ./...` 通过；主包覆盖率 98%+。
 
+## v1.0.0 发布准备（✔ 已完成）
+
+- [x] API 冻结前检查：移除 `Cron.Sub`（返回 internal 包类型）及 `internal/pubsub`；`Job1`…`Job31` / `Job1Wrapper`…`Job31Wrapper` 不再导出；`Enable` / `Disable` / `Remove` / `UpdateLabel` / `RemoveHook` / `EnableHook` / `DisableHook` / `SetHookLabel` 对未知 ID 返回错误；`Label` / `WithID` / `WithNext` 返回 `EntryOption`；补全错误与选项文档。保留 `WithClock(clockwork.Clock)`。
+- [x] `CHANGELOG.md` 整理为 `[v1.0.0]`（含从 v0.2.0 升级指南）。
+- [ ] 合并到默认分支后打 tag：`git tag v1.0.0 && git push origin v1.0.0`
+
 ## P4 — v1.0 之后：长期维护
 
 - [x] `TestJobRunEvents` 偶发失败（v0.2.0 起就存在）：`JobRunCreatedCh` / `JobRunCompletedCh` 是无缓冲 channel + 非阻塞发送，事件大多被丢弃。改为首次调用时创建、带缓冲（100）的 channel，满了才丢弃；测试改为确定性断言。
