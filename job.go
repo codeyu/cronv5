@@ -16,55 +16,55 @@ type Job interface {
 	Run(context.Context, *Cron, JobRun) error
 }
 
-type Job1 interface{ Run() }
-type Job2 interface{ Run(context.Context) }
-type Job3 interface{ Run(EntryID) }
-type Job4 interface {
+type job1 interface{ Run() }
+type job2 interface{ Run(context.Context) }
+type job3 interface{ Run(EntryID) }
+type job4 interface {
 	Run(context.Context, EntryID)
 }
-type Job5 interface{ Run() error }
-type Job6 interface{ Run(context.Context) error }
-type Job7 interface{ Run(EntryID) error }
-type Job8 interface {
+type job5 interface{ Run() error }
+type job6 interface{ Run(context.Context) error }
+type job7 interface{ Run(EntryID) error }
+type job8 interface {
 	Run(context.Context, EntryID) error
 }
-type Job9 interface{ Run(*Cron) }
-type Job10 interface{ Run(*Cron) error }
-type Job11 interface{ Run(context.Context, *Cron) }
-type Job12 interface {
+type job9 interface{ Run(*Cron) }
+type job10 interface{ Run(*Cron) error }
+type job11 interface{ Run(context.Context, *Cron) }
+type job12 interface {
 	Run(context.Context, *Cron) error
 }
-type Job13 interface{ Run(*Cron, EntryID) }
-type Job14 interface{ Run(*Cron, EntryID) error }
-type Job15 interface {
+type job13 interface{ Run(*Cron, EntryID) }
+type job14 interface{ Run(*Cron, EntryID) error }
+type job15 interface {
 	Run(context.Context, *Cron, EntryID)
 }
-type Job16 interface {
+type job16 interface {
 	Run(context.Context, *Cron, EntryID) error
 }
-type Job17 interface{ Run(Entry) }
-type Job18 interface{ Run(Entry) error }
-type Job19 interface{ Run(context.Context, Entry) }
-type Job20 interface {
+type job17 interface{ Run(Entry) }
+type job18 interface{ Run(Entry) error }
+type job19 interface{ Run(context.Context, Entry) }
+type job20 interface {
 	Run(context.Context, Entry) error
 }
-type Job21 interface{ Run(*Cron, Entry) }
-type Job22 interface{ Run(*Cron, Entry) error }
-type Job23 interface {
+type job21 interface{ Run(*Cron, Entry) }
+type job22 interface{ Run(*Cron, Entry) error }
+type job23 interface {
 	Run(context.Context, *Cron, Entry)
 }
-type Job24 interface{ Run(JobRun) }
-type Job25 interface{ Run(JobRun) error }
-type Job26 interface{ Run(context.Context, JobRun) }
-type Job27 interface {
+type job24 interface{ Run(JobRun) }
+type job25 interface{ Run(JobRun) error }
+type job26 interface{ Run(context.Context, JobRun) }
+type job27 interface {
 	Run(context.Context, JobRun) error
 }
-type Job28 interface{ Run(*Cron, JobRun) }
-type Job29 interface{ Run(*Cron, JobRun) error }
-type Job30 interface {
+type job28 interface{ Run(*Cron, JobRun) }
+type job29 interface{ Run(*Cron, JobRun) error }
+type job30 interface {
 	Run(context.Context, *Cron, JobRun)
 }
-type Job31 interface {
+type job31 interface {
 	Run(context.Context, *Cron, Entry) error
 }
 
@@ -73,307 +73,308 @@ type FuncJob func(context.Context, *Cron, JobRun) error
 
 func (f FuncJob) Run(ctx context.Context, c *Cron, r JobRun) error { return f(ctx, c, r) }
 
-type Job1Wrapper struct{ Job1 }
+type job1Wrapper struct{ job1 }
 
-func (j *Job1Wrapper) unwrapJob() any { return j.Job1 }
+func (j *job1Wrapper) unwrapJob() any { return j.job1 }
 
-func (j *Job1Wrapper) Run(context.Context, *Cron, JobRun) error {
-	j.Job1.Run()
+func (j *job1Wrapper) Run(context.Context, *Cron, JobRun) error {
+	j.job1.Run()
 	return nil
 }
 
-type Job2Wrapper struct{ Job2 }
+type job2Wrapper struct{ job2 }
 
-func (j *Job2Wrapper) unwrapJob() any { return j.Job2 }
+func (j *job2Wrapper) unwrapJob() any { return j.job2 }
 
-func (j *Job2Wrapper) Run(ctx context.Context, _ *Cron, _ JobRun) error {
-	j.Job2.Run(ctx)
+func (j *job2Wrapper) Run(ctx context.Context, _ *Cron, _ JobRun) error {
+	j.job2.Run(ctx)
 	return nil
 }
 
-type Job3Wrapper struct{ Job3 }
+type job3Wrapper struct{ job3 }
 
-func (j *Job3Wrapper) unwrapJob() any { return j.Job3 }
+func (j *job3Wrapper) unwrapJob() any { return j.job3 }
 
-func (j *Job3Wrapper) Run(_ context.Context, _ *Cron, r JobRun) error {
-	j.Job3.Run(r.Entry.ID)
+func (j *job3Wrapper) Run(_ context.Context, _ *Cron, r JobRun) error {
+	j.job3.Run(r.Entry.ID)
 	return nil
 }
 
-type Job4Wrapper struct{ Job4 }
+type job4Wrapper struct{ job4 }
 
-func (j *Job4Wrapper) unwrapJob() any { return j.Job4 }
+func (j *job4Wrapper) unwrapJob() any { return j.job4 }
 
-func (j *Job4Wrapper) Run(ctx context.Context, _ *Cron, r JobRun) error {
-	j.Job4.Run(ctx, r.Entry.ID)
+func (j *job4Wrapper) Run(ctx context.Context, _ *Cron, r JobRun) error {
+	j.job4.Run(ctx, r.Entry.ID)
 	return nil
 }
 
-type Job5Wrapper struct{ Job5 }
+type job5Wrapper struct{ job5 }
 
-func (j *Job5Wrapper) unwrapJob() any { return j.Job5 }
+func (j *job5Wrapper) unwrapJob() any { return j.job5 }
 
-func (j *Job5Wrapper) Run(context.Context, *Cron, JobRun) error { return j.Job5.Run() }
+func (j *job5Wrapper) Run(context.Context, *Cron, JobRun) error { return j.job5.Run() }
 
-type Job6Wrapper struct{ Job6 }
+type job6Wrapper struct{ job6 }
 
-func (j *Job6Wrapper) unwrapJob() any { return j.Job6 }
+func (j *job6Wrapper) unwrapJob() any { return j.job6 }
 
-func (j *Job6Wrapper) Run(ctx context.Context, _ *Cron, _ JobRun) error {
-	return j.Job6.Run(ctx)
+func (j *job6Wrapper) Run(ctx context.Context, _ *Cron, _ JobRun) error {
+	return j.job6.Run(ctx)
 }
 
-type Job7Wrapper struct{ Job7 }
+type job7Wrapper struct{ job7 }
 
-func (j *Job7Wrapper) unwrapJob() any { return j.Job7 }
+func (j *job7Wrapper) unwrapJob() any { return j.job7 }
 
-func (j *Job7Wrapper) Run(_ context.Context, _ *Cron, r JobRun) error {
-	return j.Job7.Run(r.Entry.ID)
+func (j *job7Wrapper) Run(_ context.Context, _ *Cron, r JobRun) error {
+	return j.job7.Run(r.Entry.ID)
 }
 
-type Job8Wrapper struct{ Job8 }
+type job8Wrapper struct{ job8 }
 
-func (j *Job8Wrapper) unwrapJob() any { return j.Job8 }
+func (j *job8Wrapper) unwrapJob() any { return j.job8 }
 
-func (j *Job8Wrapper) Run(ctx context.Context, _ *Cron, r JobRun) error {
-	return j.Job8.Run(ctx, r.Entry.ID)
+func (j *job8Wrapper) Run(ctx context.Context, _ *Cron, r JobRun) error {
+	return j.job8.Run(ctx, r.Entry.ID)
 }
 
-type Job9Wrapper struct{ Job9 }
+type job9Wrapper struct{ job9 }
 
-func (j *Job9Wrapper) unwrapJob() any { return j.Job9 }
+func (j *job9Wrapper) unwrapJob() any { return j.job9 }
 
-func (j *Job9Wrapper) Run(_ context.Context, cron *Cron, _ JobRun) error {
-	j.Job9.Run(cron)
+func (j *job9Wrapper) Run(_ context.Context, cron *Cron, _ JobRun) error {
+	j.job9.Run(cron)
 	return nil
 }
 
-type Job10Wrapper struct{ Job10 }
+type job10Wrapper struct{ job10 }
 
-func (j *Job10Wrapper) unwrapJob() any { return j.Job10 }
+func (j *job10Wrapper) unwrapJob() any { return j.job10 }
 
-func (j *Job10Wrapper) Run(_ context.Context, cron *Cron, _ JobRun) error {
-	return j.Job10.Run(cron)
+func (j *job10Wrapper) Run(_ context.Context, cron *Cron, _ JobRun) error {
+	return j.job10.Run(cron)
 }
 
-type Job11Wrapper struct{ Job11 }
+type job11Wrapper struct{ job11 }
 
-func (j *Job11Wrapper) unwrapJob() any { return j.Job11 }
+func (j *job11Wrapper) unwrapJob() any { return j.job11 }
 
-func (j *Job11Wrapper) Run(ctx context.Context, cron *Cron, _ JobRun) error {
-	j.Job11.Run(ctx, cron)
+func (j *job11Wrapper) Run(ctx context.Context, cron *Cron, _ JobRun) error {
+	j.job11.Run(ctx, cron)
 	return nil
 }
 
-type Job12Wrapper struct{ Job12 }
+type job12Wrapper struct{ job12 }
 
-func (j *Job12Wrapper) unwrapJob() any { return j.Job12 }
+func (j *job12Wrapper) unwrapJob() any { return j.job12 }
 
-func (j *Job12Wrapper) Run(ctx context.Context, cron *Cron, _ JobRun) error {
-	return j.Job12.Run(ctx, cron)
+func (j *job12Wrapper) Run(ctx context.Context, cron *Cron, _ JobRun) error {
+	return j.job12.Run(ctx, cron)
 }
 
-type Job13Wrapper struct{ Job13 }
+type job13Wrapper struct{ job13 }
 
-func (j *Job13Wrapper) unwrapJob() any { return j.Job13 }
+func (j *job13Wrapper) unwrapJob() any { return j.job13 }
 
-func (j *Job13Wrapper) Run(_ context.Context, cron *Cron, r JobRun) error {
-	j.Job13.Run(cron, r.Entry.ID)
+func (j *job13Wrapper) Run(_ context.Context, cron *Cron, r JobRun) error {
+	j.job13.Run(cron, r.Entry.ID)
 	return nil
 }
 
-type Job14Wrapper struct{ Job14 }
+type job14Wrapper struct{ job14 }
 
-func (j *Job14Wrapper) unwrapJob() any { return j.Job14 }
+func (j *job14Wrapper) unwrapJob() any { return j.job14 }
 
-func (j *Job14Wrapper) Run(_ context.Context, cron *Cron, r JobRun) error {
-	return j.Job14.Run(cron, r.Entry.ID)
+func (j *job14Wrapper) Run(_ context.Context, cron *Cron, r JobRun) error {
+	return j.job14.Run(cron, r.Entry.ID)
 }
 
-type Job15Wrapper struct{ Job15 }
+type job15Wrapper struct{ job15 }
 
-func (j *Job15Wrapper) unwrapJob() any { return j.Job15 }
+func (j *job15Wrapper) unwrapJob() any { return j.job15 }
 
-func (j *Job15Wrapper) Run(ctx context.Context, cron *Cron, r JobRun) error {
-	j.Job15.Run(ctx, cron, r.Entry.ID)
+func (j *job15Wrapper) Run(ctx context.Context, cron *Cron, r JobRun) error {
+	j.job15.Run(ctx, cron, r.Entry.ID)
 	return nil
 }
 
-type Job16Wrapper struct{ Job16 }
+type job16Wrapper struct{ job16 }
 
-func (j *Job16Wrapper) unwrapJob() any { return j.Job16 }
+func (j *job16Wrapper) unwrapJob() any { return j.job16 }
 
-func (j *Job16Wrapper) Run(ctx context.Context, cron *Cron, r JobRun) error {
-	return j.Job16.Run(ctx, cron, r.Entry.ID)
+func (j *job16Wrapper) Run(ctx context.Context, cron *Cron, r JobRun) error {
+	return j.job16.Run(ctx, cron, r.Entry.ID)
 }
 
-type Job17Wrapper struct{ Job17 }
+type job17Wrapper struct{ job17 }
 
-func (j *Job17Wrapper) unwrapJob() any { return j.Job17 }
+func (j *job17Wrapper) unwrapJob() any { return j.job17 }
 
-func (j *Job17Wrapper) Run(_ context.Context, _ *Cron, r JobRun) error {
-	j.Job17.Run(r.Entry)
+func (j *job17Wrapper) Run(_ context.Context, _ *Cron, r JobRun) error {
+	j.job17.Run(r.Entry)
 	return nil
 }
 
-type Job18Wrapper struct{ Job18 }
+type job18Wrapper struct{ job18 }
 
-func (j *Job18Wrapper) unwrapJob() any { return j.Job18 }
+func (j *job18Wrapper) unwrapJob() any { return j.job18 }
 
-func (j *Job18Wrapper) Run(_ context.Context, _ *Cron, r JobRun) error {
-	return j.Job18.Run(r.Entry)
+func (j *job18Wrapper) Run(_ context.Context, _ *Cron, r JobRun) error {
+	return j.job18.Run(r.Entry)
 }
 
-type Job19Wrapper struct{ Job19 }
+type job19Wrapper struct{ job19 }
 
-func (j *Job19Wrapper) unwrapJob() any { return j.Job19 }
+func (j *job19Wrapper) unwrapJob() any { return j.job19 }
 
-func (j *Job19Wrapper) Run(ctx context.Context, _ *Cron, r JobRun) error {
-	j.Job19.Run(ctx, r.Entry)
+func (j *job19Wrapper) Run(ctx context.Context, _ *Cron, r JobRun) error {
+	j.job19.Run(ctx, r.Entry)
 	return nil
 }
 
-type Job20Wrapper struct{ Job20 }
+type job20Wrapper struct{ job20 }
 
-func (j *Job20Wrapper) unwrapJob() any { return j.Job20 }
+func (j *job20Wrapper) unwrapJob() any { return j.job20 }
 
-func (j *Job20Wrapper) Run(ctx context.Context, _ *Cron, r JobRun) error {
-	return j.Job20.Run(ctx, r.Entry)
+func (j *job20Wrapper) Run(ctx context.Context, _ *Cron, r JobRun) error {
+	return j.job20.Run(ctx, r.Entry)
 }
 
-type Job21Wrapper struct{ Job21 }
+type job21Wrapper struct{ job21 }
 
-func (j *Job21Wrapper) unwrapJob() any { return j.Job21 }
+func (j *job21Wrapper) unwrapJob() any { return j.job21 }
 
-func (j *Job21Wrapper) Run(_ context.Context, c *Cron, r JobRun) error {
-	j.Job21.Run(c, r.Entry)
+func (j *job21Wrapper) Run(_ context.Context, c *Cron, r JobRun) error {
+	j.job21.Run(c, r.Entry)
 	return nil
 }
 
-type Job22Wrapper struct{ Job22 }
+type job22Wrapper struct{ job22 }
 
-func (j *Job22Wrapper) unwrapJob() any { return j.Job22 }
+func (j *job22Wrapper) unwrapJob() any { return j.job22 }
 
-func (j *Job22Wrapper) Run(_ context.Context, c *Cron, r JobRun) error {
-	return j.Job22.Run(c, r.Entry)
+func (j *job22Wrapper) Run(_ context.Context, c *Cron, r JobRun) error {
+	return j.job22.Run(c, r.Entry)
 }
 
-type Job23Wrapper struct{ Job23 }
+type job23Wrapper struct{ job23 }
 
-func (j *Job23Wrapper) unwrapJob() any { return j.Job23 }
+func (j *job23Wrapper) unwrapJob() any { return j.job23 }
 
-func (j *Job23Wrapper) Run(ctx context.Context, c *Cron, r JobRun) error {
-	j.Job23.Run(ctx, c, r.Entry)
+func (j *job23Wrapper) Run(ctx context.Context, c *Cron, r JobRun) error {
+	j.job23.Run(ctx, c, r.Entry)
 	return nil
 }
 
-type Job24Wrapper struct{ Job24 }
+type job24Wrapper struct{ job24 }
 
-func (j *Job24Wrapper) unwrapJob() any { return j.Job24 }
+func (j *job24Wrapper) unwrapJob() any { return j.job24 }
 
-func (j *Job24Wrapper) Run(_ context.Context, _ *Cron, r JobRun) error {
-	j.Job24.Run(r)
+func (j *job24Wrapper) Run(_ context.Context, _ *Cron, r JobRun) error {
+	j.job24.Run(r)
 	return nil
 }
 
-type Job25Wrapper struct{ Job25 }
+type job25Wrapper struct{ job25 }
 
-func (j *Job25Wrapper) unwrapJob() any { return j.Job25 }
+func (j *job25Wrapper) unwrapJob() any { return j.job25 }
 
-func (j *Job25Wrapper) Run(_ context.Context, _ *Cron, r JobRun) error {
-	return j.Job25.Run(r)
+func (j *job25Wrapper) Run(_ context.Context, _ *Cron, r JobRun) error {
+	return j.job25.Run(r)
 }
 
-type Job26Wrapper struct{ Job26 }
+type job26Wrapper struct{ job26 }
 
-func (j *Job26Wrapper) unwrapJob() any { return j.Job26 }
+func (j *job26Wrapper) unwrapJob() any { return j.job26 }
 
-func (j *Job26Wrapper) Run(ctx context.Context, _ *Cron, r JobRun) error {
-	j.Job26.Run(ctx, r)
+func (j *job26Wrapper) Run(ctx context.Context, _ *Cron, r JobRun) error {
+	j.job26.Run(ctx, r)
 	return nil
 }
 
-type Job27Wrapper struct{ Job27 }
+type job27Wrapper struct{ job27 }
 
-func (j *Job27Wrapper) unwrapJob() any { return j.Job27 }
+func (j *job27Wrapper) unwrapJob() any { return j.job27 }
 
-func (j *Job27Wrapper) Run(ctx context.Context, _ *Cron, r JobRun) error {
-	return j.Job27.Run(ctx, r)
+func (j *job27Wrapper) Run(ctx context.Context, _ *Cron, r JobRun) error {
+	return j.job27.Run(ctx, r)
 }
 
-type Job28Wrapper struct{ Job28 }
+type job28Wrapper struct{ job28 }
 
-func (j *Job28Wrapper) unwrapJob() any { return j.Job28 }
+func (j *job28Wrapper) unwrapJob() any { return j.job28 }
 
-func (j *Job28Wrapper) Run(_ context.Context, c *Cron, r JobRun) error {
-	j.Job28.Run(c, r)
+func (j *job28Wrapper) Run(_ context.Context, c *Cron, r JobRun) error {
+	j.job28.Run(c, r)
 	return nil
 }
 
-type Job29Wrapper struct{ Job29 }
+type job29Wrapper struct{ job29 }
 
-func (j *Job29Wrapper) unwrapJob() any { return j.Job29 }
+func (j *job29Wrapper) unwrapJob() any { return j.job29 }
 
-func (j *Job29Wrapper) Run(_ context.Context, c *Cron, r JobRun) error {
-	return j.Job29.Run(c, r)
+func (j *job29Wrapper) Run(_ context.Context, c *Cron, r JobRun) error {
+	return j.job29.Run(c, r)
 }
 
-type Job30Wrapper struct{ Job30 }
+type job30Wrapper struct{ job30 }
 
-func (j *Job30Wrapper) unwrapJob() any { return j.Job30 }
+func (j *job30Wrapper) unwrapJob() any { return j.job30 }
 
-func (j *Job30Wrapper) Run(ctx context.Context, c *Cron, r JobRun) error {
-	j.Job30.Run(ctx, c, r)
+func (j *job30Wrapper) Run(ctx context.Context, c *Cron, r JobRun) error {
+	j.job30.Run(ctx, c, r)
 	return nil
 }
 
-type Job31Wrapper struct{ Job31 }
+type job31Wrapper struct{ job31 }
 
-func (j *Job31Wrapper) unwrapJob() any { return j.Job31 }
+func (j *job31Wrapper) unwrapJob() any { return j.job31 }
 
-func (j *Job31Wrapper) Run(ctx context.Context, c *Cron, r JobRun) error {
-	return j.Job31.Run(ctx, c, r.Entry)
+func (j *job31Wrapper) Run(ctx context.Context, c *Cron, r JobRun) error {
+	return j.job31.Run(ctx, c, r.Entry)
 }
 
 // IntoJob is something that can be cast into a Job.
 // See the J helper documentation for all accepted function signatures.
 type IntoJob any
 
-// J is a helper to turn a IntoJob into a Job
-// Any of these functions, or anything that have a "Run" method
-// with one of these signatures can be casted into a Job.
-// func()
-// func() error
-// func(context.Context)
-// func(context.Context) error
-// func(cron.EntryID)
-// func(cron.EntryID) error
-// func(cron.Entry)
-// func(cron.Entry) error
-// func(*cron.Cron)
-// func(*cron.Cron) error
-// func(cron.JobRun)
-// func(cron.JobRun) error
-// func(context.Context, cron.EntryID)
-// func(context.Context, cron.EntryID) error
-// func(context.Context, cron.Entry)
-// func(context.Context, cron.Entry) error
-// func(context.Context, *cron.Cron)
-// func(context.Context, *cron.Cron) error
-// func(context.Context, cron.JobRun)
-// func(context.Context, cron.JobRun) error
-// func(*cron.Cron, cron.EntryID)
-// func(*cron.Cron, cron.EntryID) error
-// func(*cron.Cron, cron.Entry)
-// func(*cron.Cron, cron.Entry) error
-// func(*cron.Cron, cron.JobRun)
-// func(*cron.Cron, cron.JobRun) error
-// func(context.Context, *cron.Cron, cron.EntryID)
-// func(context.Context, *cron.Cron, cron.EntryID) error
-// func(context.Context, *cron.Cron, cron.Entry)
-// func(context.Context, *cron.Cron, cron.Entry) error
-// func(context.Context, *cron.Cron, cron.JobRun)
-// func(context.Context, *cron.Cron, cron.JobRun) error
+// J is a helper to turn a IntoJob into a Job. It panics with ErrUnsupportedJobType for other types.
+// A Job, any of these functions, or a value having a "Run" method with one of these signatures
+// (eg: "func (MyJob) Run(context.Context) error") can be turned into a Job:
+//
+//	func()
+//	func() error
+//	func(context.Context)
+//	func(context.Context) error
+//	func(cron.EntryID)
+//	func(cron.EntryID) error
+//	func(cron.Entry)
+//	func(cron.Entry) error
+//	func(*cron.Cron)
+//	func(*cron.Cron) error
+//	func(cron.JobRun)
+//	func(cron.JobRun) error
+//	func(context.Context, cron.EntryID)
+//	func(context.Context, cron.EntryID) error
+//	func(context.Context, cron.Entry)
+//	func(context.Context, cron.Entry) error
+//	func(context.Context, *cron.Cron)
+//	func(context.Context, *cron.Cron) error
+//	func(context.Context, cron.JobRun)
+//	func(context.Context, cron.JobRun) error
+//	func(*cron.Cron, cron.EntryID)
+//	func(*cron.Cron, cron.EntryID) error
+//	func(*cron.Cron, cron.Entry)
+//	func(*cron.Cron, cron.Entry) error
+//	func(*cron.Cron, cron.JobRun)
+//	func(*cron.Cron, cron.JobRun) error
+//	func(context.Context, *cron.Cron, cron.EntryID)
+//	func(context.Context, *cron.Cron, cron.EntryID) error
+//	func(context.Context, *cron.Cron, cron.Entry)
+//	func(context.Context, *cron.Cron, cron.Entry) error
+//	func(context.Context, *cron.Cron, cron.JobRun)
+//	func(context.Context, *cron.Cron, cron.JobRun) error
 func J(v IntoJob) Job { return castIntoJob(v) }
 
 func castIntoJob(v IntoJob) Job {
@@ -522,68 +523,68 @@ func castIntoJob(v IntoJob) Job {
 		})
 	case Job:
 		return j
-	case Job1:
-		return &Job1Wrapper{j}
-	case Job2:
-		return &Job2Wrapper{j}
-	case Job3:
-		return &Job3Wrapper{j}
-	case Job4:
-		return &Job4Wrapper{j}
-	case Job5:
-		return &Job5Wrapper{j}
-	case Job6:
-		return &Job6Wrapper{j}
-	case Job7:
-		return &Job7Wrapper{j}
-	case Job8:
-		return &Job8Wrapper{j}
-	case Job9:
-		return &Job9Wrapper{j}
-	case Job10:
-		return &Job10Wrapper{j}
-	case Job11:
-		return &Job11Wrapper{j}
-	case Job12:
-		return &Job12Wrapper{j}
-	case Job13:
-		return &Job13Wrapper{j}
-	case Job14:
-		return &Job14Wrapper{j}
-	case Job15:
-		return &Job15Wrapper{j}
-	case Job16:
-		return &Job16Wrapper{j}
-	case Job17:
-		return &Job17Wrapper{j}
-	case Job18:
-		return &Job18Wrapper{j}
-	case Job19:
-		return &Job19Wrapper{j}
-	case Job20:
-		return &Job20Wrapper{j}
-	case Job21:
-		return &Job21Wrapper{j}
-	case Job22:
-		return &Job22Wrapper{j}
-	case Job23:
-		return &Job23Wrapper{j}
-	case Job24:
-		return &Job24Wrapper{j}
-	case Job25:
-		return &Job25Wrapper{j}
-	case Job26:
-		return &Job26Wrapper{j}
-	case Job27:
-		return &Job27Wrapper{j}
-	case Job28:
-		return &Job28Wrapper{j}
-	case Job29:
-		return &Job29Wrapper{j}
-	case Job30:
-		return &Job30Wrapper{j}
-	case Job31:
-		return &Job31Wrapper{j}
+	case job1:
+		return &job1Wrapper{j}
+	case job2:
+		return &job2Wrapper{j}
+	case job3:
+		return &job3Wrapper{j}
+	case job4:
+		return &job4Wrapper{j}
+	case job5:
+		return &job5Wrapper{j}
+	case job6:
+		return &job6Wrapper{j}
+	case job7:
+		return &job7Wrapper{j}
+	case job8:
+		return &job8Wrapper{j}
+	case job9:
+		return &job9Wrapper{j}
+	case job10:
+		return &job10Wrapper{j}
+	case job11:
+		return &job11Wrapper{j}
+	case job12:
+		return &job12Wrapper{j}
+	case job13:
+		return &job13Wrapper{j}
+	case job14:
+		return &job14Wrapper{j}
+	case job15:
+		return &job15Wrapper{j}
+	case job16:
+		return &job16Wrapper{j}
+	case job17:
+		return &job17Wrapper{j}
+	case job18:
+		return &job18Wrapper{j}
+	case job19:
+		return &job19Wrapper{j}
+	case job20:
+		return &job20Wrapper{j}
+	case job21:
+		return &job21Wrapper{j}
+	case job22:
+		return &job22Wrapper{j}
+	case job23:
+		return &job23Wrapper{j}
+	case job24:
+		return &job24Wrapper{j}
+	case job25:
+		return &job25Wrapper{j}
+	case job26:
+		return &job26Wrapper{j}
+	case job27:
+		return &job27Wrapper{j}
+	case job28:
+		return &job28Wrapper{j}
+	case job29:
+		return &job29Wrapper{j}
+	case job30:
+		return &job30Wrapper{j}
+	case job31:
+		return &job31Wrapper{j}
 	default:
 		panic(ErrUnsupportedJobType)
 	}
@@ -595,7 +596,7 @@ type JobWrapper func(IntoJob) Job
 func Once(job IntoJob) Job {
 	inner := J(job) // Convert once, unsupported types panic when the wrapper is created
 	return FuncJob(func(ctx context.Context, c *Cron, r JobRun) error {
-		c.removeKeepRun(r.Entry.ID, r.RunID) // Do not cancel the current run
+		_ = c.removeKeepRun(r.Entry.ID, r.RunID) // Do not cancel the current run
 		return inner.Run(ctx, c, r)
 	})
 }
@@ -611,7 +612,7 @@ func NWrapper(n int) JobWrapper {
 		inner := J(job)
 		return FuncJob(func(ctx context.Context, c *Cron, r JobRun) error {
 			if newCount := count.Add(1); int(newCount) == n {
-				c.removeKeepRun(r.Entry.ID, r.RunID) // Do not cancel the current run
+				_ = c.removeKeepRun(r.Entry.ID, r.RunID) // Do not cancel the current run
 			}
 			return inner.Run(ctx, c, r)
 		})
@@ -651,7 +652,7 @@ func ThresholdClbAsyncWrapper(threshold time.Duration, clb ThresholdCallbackAsyn
 	}
 }
 
-// ThresholdClbAsync ...
+// ThresholdClbAsync calls the callback (asynchronously) if the job is still running after the threshold
 func ThresholdClbAsync(threshold time.Duration, j IntoJob, clb ThresholdCallbackAsync) Job {
 	return ThresholdClbAsyncWrapper(threshold, clb)(j)
 }
@@ -741,7 +742,7 @@ func TimeoutWrapper(duration time.Duration) JobWrapper {
 	}
 }
 
-// WithTimeout ...
+// WithTimeout cancels the context of the job after the given duration:
 // `_, _ = cron.AddJob("* * * * * *", cron.WithTimeout(time.Second, func(ctx context.Context) { ... }))`
 func WithTimeout(d time.Duration, job IntoJob) Job {
 	return TimeoutWrapper(d)(job)

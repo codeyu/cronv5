@@ -49,16 +49,21 @@ was not running are rescheduled, instead of all running at once when the cron st
 
 A cron expression represents a set of times, using 5 space-separated fields.
 When the cron is built with WithSeconds, a mandatory seconds field is added in first position,
-and the day of week field becomes optional.
+and the day of week field becomes optional. A 5 fields spec is then read as "second minute hour
+day-of-month month": "0 9 * * *" is every hour at minute 9, not 9:00. WithOptionalSeconds accepts
+both: 5 fields specs without seconds ("0 9 * * *" is 9:00), and 6 fields specs with seconds first
+("30 0 9 * * *" is 9:00:30).
 
 	Field name   | Mandatory? | Allowed values  | Allowed special characters
 	----------   | ---------- | --------------  | --------------------------
-	Seconds      | WithSeconds| 0-59            | * / , -
+	Seconds      | See above  | 0-59            | * / , -
 	Minutes      | Yes        | 0-59            | * / , -
 	Hours        | Yes        | 0-23            | * / , -
-	Day of month | Yes        | 1-31            | * / , - ?
+	Day of month | Yes        | 1-31            | * / , - ? L W
 	Month        | Yes        | 1-12 or JAN-DEC | * / , -
-	Day of week  | Yes        | 0-6 or SUN-SAT  | * / , - ?
+	Day of week  | Yes        | 0-7 or SUN-SAT  | * / , - ? L #
+
+Day of week 0 and 7 are both Sunday (Vixie cron numbering; note that Quartz uses 1 for Sunday).
 
 Note: Month and Day-of-week field values are case insensitive. "SUN", "Sun",
 and "sun" are equally accepted.
@@ -94,10 +99,39 @@ Hyphen ( - )
 Hyphens are used to define ranges. For example, 9-17 would indicate every
 hour between 9am and 5pm inclusive.
 
+In the month and day of week fields, a range can wrap around: "FRI-MON" is Friday,
+Saturday, Sunday and Monday, "NOV-FEB" is November to February. The other fields
+reject a range whose beginning is after its end.
+
 Question mark ( ? )
 
 Question mark may be used instead of '*' for leaving either day-of-month or
 day-of-week blank.
+
+L, W and # (day of month and day of week)
+
+These items depend on the month, they can be combined with other items in a list
+(eg: "1,15,L"), but not in a range or with an increment.
+
+	Item   | Field        | Meaning
+	----   | -----        | -------
+	L      | Day of month | Last day of the month
+	L-n    | Day of month | n days before the last day of the month (0-30), eg: L-2
+	LW     | Day of month | Last weekday (Monday to Friday) of the month
+	nW     | Day of month | Weekday nearest to the n-th day of the month, eg: 15W
+	dL     | Day of week  | Last day d of the month, eg: 5L or FRIL (last Friday)
+	d#k    | Day of week  | k-th day d of the month (1-5), eg: MON#1 (first Monday)
+
+"nW" never leaves the month: when the 1st is a Saturday, "1W" is Monday the 3rd, and
+when the 31st is a Sunday, "31W" is Friday the 29th. It does not activate in months
+that have no n-th day (eg: "31W" in April).
+
+"L" alone in the day of week field is rejected, as its meaning differs between cron
+implementations: use 6 (or SAT) for Saturday, or 5L for the last Friday of the month.
+
+As for other items, when both the day of month and day of week fields are restricted
+(neither is '*' or '?'), the schedule activates on days matching either one:
+"0 0 L * MON#1" activates on the first Monday and on the last day of every month.
 
 # Predefined schedules
 
@@ -110,6 +144,60 @@ You may use one of several pre-defined schedules in place of a cron expression.
 	@weekly                | Run once a week, midnight between Sat/Sun  | 0 0 * * 0
 	@daily (or @midnight)  | Run once a day, midnight                   | 0 0 * * *
 	@hourly                | Run once an hour, beginning of hour        | 0 * * * *
+
+# Missed activations
+
+An activation is missed when the cron was not running at that time, or could not run the job on
+time (eg: the machine was sleeping). The misfire policy, set for the cron (Builder.WithMisfirePolicy)
+or for an entry (WithMisfirePolicy), tells what to do:
+
+	Policy          | Missed while running | Missed while not running
+	------          | -------------------- | ------------------------
+	MisfireDefault  | run once             | skipped
+	MisfireSkip     | skipped              | skipped
+	MisfireRunOnce  | run once             | run once
+	MisfireRunAll   | each one runs        | each one runs
+
+MisfireSkip only skips the activations missed by more than the misfire threshold
+(Builder.WithMisfireThreshold, one minute by default). Activations explicitly set (RunOnStart,
+WithNext, AddJobAt) are never skipped. JobRun.ScheduledAt is the activation a run is for, and
+skipped activations are reported to Metrics.JobSkipped.
+
+# Concurrency
+
+By default, a job runs at each activation even if its previous run is still running. The
+NoOverlap entry option skips the activations happening while a previous run is still running
+(reported to Metrics.JobSkipped). The number of jobs running at the same time can be limited for
+the whole cron (Builder.WithMaxConcurrentJobs) and for the entries having a tag
+(Builder.WithTagConcurrencyLimit): the runs over a limit wait for a running job to complete.
+
+	c := cron.New().WithMaxConcurrentJobs(10).WithTagConcurrencyLimit("db", 2).Build()
+	_, _ = c.AddJob("*\/5 * * * *", backup, cron.WithTags("db"), cron.NoOverlap)
+
+# One-time jobs
+
+AddJobAt runs a job once, at a given time, then removes its entry:
+
+	id, err := c.AddJobAt(time.Now().Add(2*time.Hour), func() { ... })
+
+A time already past runs as soon as possible, and a time that went by while the cron was not
+running runs when it starts. The At schedule (activating once) can also be used on its own.
+
+# Activation times
+
+The activation times of a schedule can be listed without running it:
+
+	sched, _ := cron.ParseStandard("0 9 * * MON-FRI")
+	next5 := cron.NextN(sched, time.Now(), 5) // the next 5 activation times
+	for t := range cron.Activations(sched, time.Now()) {
+		// successive activation times, until break
+	}
+	prev := sched.(*cron.SpecSchedule).Prev(time.Now()) // the last activation time
+
+For an entry of a Cron, NextActivations lists the next activation times in the cron location,
+starting with the entry's next activation time:
+
+	times, err := c.NextActivations(id, 5)
 
 # Intervals
 
@@ -124,6 +212,13 @@ where "duration" is a string accepted by time.ParseDuration
 For example, "@every 1h30m10s" would indicate a schedule that activates after
 1 hour, 30 minutes, 10 seconds, and then every interval after that.
 
+The first activation is one interval after the entry is added (if that time went by before the cron
+is started, see "Missed activations"). To run the job right away, then at every interval, use the
+RunOnStart entry option. To choose the first activation, use WithNext:
+
+	c.AddJob("@every 1h", job, cron.RunOnStart)                              // now, then every hour
+	c.AddJob("@every 1h", job, cron.WithNext(time.Now().Add(10*time.Minute))) // in 10 minutes, then every hour
+
 Note: The interval does not take the job runtime into account. For example,
 if a job takes 3 minutes to run, and it is scheduled to run every 5 minutes,
 it will have only 2 minutes of idle time between each run.
@@ -135,10 +230,32 @@ By default, all interpretation and scheduling is done in the time zone of the cl
 or at runtime with SetLocation.
 
 A spec can also be prefixed with "CRON_TZ=<zone>" (or "TZ=<zone>") to use a specific time zone,
-for example "CRON_TZ=Asia/Tokyo 0 6 * * *".
+for example "CRON_TZ=Asia/Tokyo 0 6 * * *". The zone can also be a UTC offset, such as "UTC+8",
+"UTC+05:30", "GMT-5" or "+0900": the offset is east of UTC, "UTC+8" is 8 hours ahead of UTC (as in
+ISO 8601, unlike the POSIX TZ variable and the IANA "Etc/GMT+8" zone, which is 8 hours behind UTC).
+A UTC offset has no daylight saving time.
 
-Be aware that jobs scheduled during daylight-savings leap-ahead transitions will
-not be run, and jobs scheduled during leap-behind transitions will run twice!
+The tz database of the machine is used (see time.LoadLocation). To embed it in the program
+instead, import the time/tzdata package:
+
+	import _ "time/tzdata"
+
+# Daylight saving time
+
+Daylight saving time transitions are handled as Vixie cron (the Linux crontab) does. Schedules
+whose second, minute or hour field starts with '*' (eg: "*\/5 * * * *", "0 * * * *") are
+interval schedules, the other ones (eg: "30 2 * * *", "0 9 * * MON") run at a fixed time.
+
+When the clock jumps forward (eg: from 2:00 to 3:00):
+  - a fixed time schedule whose time is skipped runs once at the end of the jump (3:00);
+  - an interval schedule skips the times that do not exist.
+
+When the clock goes back (eg: from 2:00 to 1:00, 1:00-2:00 occurs twice):
+  - a fixed time schedule whose time is repeated runs only the first time;
+  - an interval schedule runs both times.
+
+So "30 2 * * *" runs every day, once, and "0 * * * *" runs every hour of elapsed time.
+Time zones without daylight saving time (eg: UTC, Asia/Tokyo) are not affected.
 
 # Thread safety
 

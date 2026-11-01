@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"slices"
 	"time"
 )
 
@@ -19,6 +20,13 @@ type Entry struct {
 	Prev time.Time
 	// Label to describe the job
 	Label string
+	// Tags of the entry (see WithTags), to query or manage entries by group
+	Tags []string
+	// Skip the activations happening while a previous run of the entry is still running (see NoOverlap)
+	NoOverlap bool
+	// What to do with the activations missed by more than the misfire threshold (see WithMisfirePolicy).
+	// MisfireDefault uses the policy of the cron.
+	MisfirePolicy MisfirePolicy
 	// Either or not the job is currently active
 	Active bool
 	// The Job to run.
@@ -32,7 +40,11 @@ type jobUnwrapper interface {
 	unwrapJob() any
 }
 
-// Job returns the original job as it was before it was wrapped by the cron library
+// Job returns the job given to AddJob (for a function, the function itself, before it
+// was adapted to the Job interface).
+//
+// Calling it directly bypasses the cron: no job run (RunID, logger), hooks, events nor panic
+// recovery. Use Cron.Trigger (or RunNow) to run the job now as the cron does.
 func (e Entry) Job() any {
 	if w, ok := e.job.(jobUnwrapper); ok {
 		return w.unwrapJob()
@@ -40,32 +52,80 @@ func (e Entry) Job() any {
 	return e.job
 }
 
+// snapshot returns a copy of the entry that does not share memory with it
+func (e *Entry) snapshot() Entry {
+	out := *e
+	out.Tags = slices.Clone(e.Tags)
+	return out
+}
+
+// HasTag returns true if the entry has the given tag
+func (e Entry) HasTag(tag string) bool {
+	return slices.Contains(e.Tags, tag)
+}
+
+// EntryOption configures an entry when it is added (AddJob, Schedule, AddJobAt...)
 type EntryOption func(*Cron, *Entry)
 
-func Label(label string) func(*Cron, *Entry) {
+// WithTags adds tags to the entry, to query or manage entries by group
+// (EntriesByTag, RemoveByTag, EnableByTag, DisableByTag) or to limit their concurrency
+// (WithTagConcurrencyLimit). Duplicated and empty tags are ignored.
+func WithTags(tags ...string) EntryOption {
+	return func(_ *Cron, entry *Entry) {
+		entry.Tags = mergeTags(entry.Tags, tags)
+	}
+}
+
+// mergeTags returns a new slice with the tags of a then b, without duplicated or empty tags
+func mergeTags(a, b []string) []string {
+	out := make([]string, 0, len(a)+len(b))
+	for _, tag := range slices.Concat(a, b) {
+		if tag != "" && !slices.Contains(out, tag) {
+			out = append(out, tag)
+		}
+	}
+	return out
+}
+
+// Label sets the label of the entry, to describe it (see UpdateLabel)
+func Label(label string) EntryOption {
 	return func(_ *Cron, entry *Entry) {
 		entry.Label = label
 	}
 }
 
-func WithID(id EntryID) func(*Cron, *Entry) {
+// WithID sets the ID of the entry, instead of a generated one (AddJob returns ErrIDAlreadyUsed if it is used)
+func WithID(id EntryID) EntryOption {
 	return func(_ *Cron, entry *Entry) {
 		entry.ID = id
 	}
 }
 
-func WithNext(next time.Time) func(*Cron, *Entry) {
+// WithNext sets the first activation time of the entry, the schedule is used for the next ones.
+// The time is kept if the cron is started after it: the job then runs when the cron starts.
+func WithNext(next time.Time) EntryOption {
 	return func(_ *Cron, entry *Entry) {
 		entry.Next = next
 		entry.pinnedNext = true
 	}
 }
 
+// RunOnStart runs the job as soon as the entry is added (or the cron is started), then on its schedule
 func RunOnStart(c *Cron, entry *Entry) {
 	entry.Next = c.now()
 	entry.pinnedNext = true
 }
 
+// NoOverlap skips the activations of the entry happening while a previous run of the entry is
+// still running (including a run waiting for a concurrency limit). The skipped activations are
+// reported to Metrics.JobSkipped, and Trigger returns ErrJobAlreadyRunning.
+//
+// Unlike the SkipIfStillRunning job wrapper, no job run is created for a skipped activation.
+func NoOverlap(_ *Cron, entry *Entry) {
+	entry.NoOverlap = true
+}
+
+// Disabled adds the entry disabled, it does not run until it is enabled (see Enable)
 func Disabled(_ *Cron, entry *Entry) {
 	entry.Active = false
 }

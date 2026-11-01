@@ -611,8 +611,20 @@ func TestAddJobDoesNotWaitForSchedulerLoop(t *testing.T) {
 	_, _ = cron.AddJob("* * * * * *", func() {})
 	cron.Start()
 	defer cron.Stop()
-	go clock.Advance(time.Second)
-	<-factoryCalled
+	// Advance until the scheduler loop runs the job: a single Advance could happen before
+	// the scheduler goroutine created its timer, which would then never fire.
+	go func() {
+		for {
+			select {
+			case <-factoryCalled:
+				return
+			default:
+				clock.Advance(time.Second)
+				time.Sleep(time.Millisecond)
+			}
+		}
+	}()
+	recvWithTimeout(t, factoryCalled, "the scheduler loop should run the job")
 	done := make(chan struct{})
 	go func() {
 		_, _ = cron.AddJob("* * * * * *", func() {})

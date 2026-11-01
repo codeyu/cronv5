@@ -1,12 +1,12 @@
 # cronv5 Review & TODO
 
-> 审查范围：`cron.go` / `job.go` / `job_run.go` / `entry.go` / `entry_heap.go` / `parser.go` / `spec.go` / `webadmin/` / `internal/`
+> 审查范围：`cron.go` / `job.go` / `job_run.go` / `entry.go` / `entry_heap.go` / `parser.go` / `spec.go` / `internal/`（`webadmin/` 已移除）
 > 参考来源：[robfig/cron](https://github.com/robfig/cron) 的 issues / PRs（按 👍 和讨论数排序）
 > 标注说明：✅ = 已写复现测试确认；🔍 = 代码阅读确认；`rc#N` = robfig/cron 对应 issue/PR 编号
 
 ---
 
-## P0 — 已确认的 Bug（✔ 已全部修复，回归测试见 `regression_test.go`、`webadmin/main_test.go`）
+## P0 — 已确认的 Bug（✔ 已全部修复，回归测试见 `regression_test.go`）
 
 - [x] **B1 `Once()` / `N()` 在执行前就把自己的 ctx 取消了** ✅
   `job.go:533` `Once` 先调用 `c.Remove(id)`，而 `removeEntry`（`cron.go:961`）会 cancel 该 entry 所有正在运行的 run —— 包括当前这次。
@@ -70,7 +70,7 @@
   `cron.go:796` 先 `entryExists`（读锁）再写锁插入；并发 `AddJob(WithID(x))` 可能都成功，后者覆盖 map 但 heap `Push` 被忽略 → map 与 heap 不一致。
   修复：在同一把写锁内检查 + 插入；并校验 `job`/`Schedule` 非 nil。
 
-- [x] **B15 webadmin 存储型 XSS** 🔍
+- [x] **B15 webadmin 存储型 XSS** 🔍（webadmin 已整体移除）
   `webadmin/templates/run.gohtml:13`：`{{ .JobRun.Logs | Nl2br | Safe }}` 把 job 日志原样作为 HTML 输出。日志中含外部数据（URL、错误信息）即可注入脚本。
   修复：先 `html.EscapeString` 再换行，或用 CSS `white-space: pre-wrap` 去掉 `Safe`。另：POST 接口无 CSRF 防护。
 
@@ -116,37 +116,52 @@
 | CompletedJobs（1000 runs） | 2.5 ms / 2512 allocs | 2.1 ms / 1512 allocs | 1.2× |
 | Dispatch（一次触发 1000 个 job） | 8.6 ms / 34 allocs/job | 8.4 ms / 30 allocs/job | ≈1× |
 
-## P3 — 新功能（来自 robfig/cron 社区需求）
+## P3 — 新功能路线图（✔ 已全部完成，下一步发布 v1.0 并冻结 API）
 
-### 表达式 / 解析器
-- [ ] **F1 `L`（月最后一天）、`L-n`、`LW`、`W`（最近工作日）** — rc#397、rc#279、rc#105
-- [ ] **F2 `#`（第 n 个星期几，如 `MON#1`）与 `5L`（最后一个周五）** — rc#486、rc#518
-- [ ] **F3 Jenkins 风格 `H` 哈希值**（按 entry ID 打散，避免同一时刻雪崩）— rc#309
-- [ ] **F4 星期 `7` = 周日、环绕区间 `FRI-MON`** — 常见需求，Vixie cron 兼容
-- [ ] **F5 可选 Year 字段（Quartz 兼容）** — rc#340
-- [ ] **F6 `Schedule.Prev()` / 获取前 N 次、后 N 次执行时间** — rc#322、rc#361、rc#224
-- [ ] **F7 时区支持 UTC 偏移（`TZ=UTC+8`）** — rc#324、rc#379
-- [ ] **F8 DST 处理策略**：当前春季跳变时 `30 2 * * *` 整天被跳过（已验证 2024-03-10 纽约直接跳到 03-11），秋季回拨执行两次。提供可选策略（跳变时在下一个有效时刻执行 / 回拨只执行一次）— rc#541
-- [ ] **F9 亚秒级 `@every`**（可选开启）— rc#178
-- [ ] **F10 表达式转人类可读描述 `Describe(spec)`** — rc#229
+表达式目标：**兼容 Vixie cron（Linux crontab），并支持 Quartz 的 `L` / `W` / `#`**。不追求"全支持"所有方言：星期仍按 Vixie 编号（0/7 = 周日），不采用 Quartz 的 1 = 周日。
 
-### 调度 / 任务
-- [ ] **F11 指定时间点的一次性任务 `At(time.Time)` / `AddOnce`** — rc#441、rc#302
-- [ ] **F12 `@every` 立即执行 / 首次延迟**（已有 `RunOnStart`、`WithNext`，补充文档及 `WithFirstDelay`）— rc#406、rc#258、rc#297
-- [ ] **F13 错过执行的补偿策略（Misfire policy）**：系统休眠/阻塞后选择“跳过 / 补跑一次 / 全部补跑”。
-- [ ] **F14 `WithRetry` 支持指数退避 + 抖动 + 自定义重试判断** — rc#560
-- [ ] **F15 全局/按标签并发限制（`WithMaxConcurrency`）**、按 entry 的 `SkipIfStillRunning` 作为 EntryOption — rc#430、rc#285
-- [ ] **F16 `RunNow` 走完整 wrapper 链并返回 RunID**；`Entry.Job` 手动调用绕过 wrapper 的问题 — rc#551
-- [ ] **F17 Entry 支持 tag/metadata，按 tag 查询/删除/暂停** — rc#307 扩展
-- [ ] **F18 `Pause()/Resume()` 整个调度器（不取消运行中任务）**
-- [ ] **F19 可插拔持久化 / 分布式锁接口（Store / Locker）**，用于多实例部署只执行一次和保存执行历史 — rc#214、rc#428
-- [ ] **F20 Metrics 钩子（Prometheus 友好的计数/耗时）**，JobRun 增加 `ScheduledAt`（本次计划时间）— rc#357
+| # | 项 | 状态 |
+|---|---|---|
+| 1 | **F1 + F2 + F4 表达式扩展**：`L`、`L-n`、`LW`、`nW`；`MON#2`、`5L`；星期 `7` = 周日、环绕区间 `FRI-MON` / `NOV-FEB` — rc#397、rc#279、rc#105、rc#486、rc#518 | [x] |
+| 2 | **F8 DST 处理**（按正确性问题处理）：采用 Vixie cron 规则——固定时刻任务在春季跳变时于跳变结束时执行一次、秋季回拨只执行第一次；间隔型任务（秒/分/时字段以 `*` 开头）跟随真实时间 — rc#541 | [x] |
+| 3 | **F6 `SpecSchedule.Prev()`、`NextN` / `Activations`（`iter.Seq`）、`Cron.NextActivations`** — rc#322、rc#361、rc#224 | [x] |
+| 4 | **F16 `Trigger(id) (RunID, error)`**：wrapper 本来就会生效（wrapper 包在 job 里），实际问题是 `RunNow` 不返回 RunID、会改写 `Next`（`@every` 相位被重置）、对禁用的 entry 静默不执行；`Entry.Job()` 补充文档 — rc#551 | [x] |
+| 5 | **F11 一次性任务 `AddJobAt(t, job)` / `At(t)` schedule**（过去的时间尽快执行，cron 未运行期间错过的在 Start 时执行）— rc#441、rc#302 | [x] |
+| 6 | **F13 Misfire 策略**：`MisfireSkip`（超过阈值才跳过，默认 1 分钟）/ `MisfireRunOnce` / `MisfireRunAll`，可按 cron 或 entry 设置；`MisfireDefault` 保持原行为 | [x] |
+| 7 | **F14 `WithRetryPolicy` / `RetryPolicyWrapper`**：指数退避（`InitialDelay`、`Multiplier`、`MaxDelay`）、抖动 `Jitter`、`RetryIf`；`WithRetry` 保持不变 — rc#560 | [x] |
+| 8 | **F15 并发限制**：`WithMaxConcurrentJobs`、`WithTagConcurrencyLimit`（超限排队等待），`NoOverlap` EntryOption（跳过并上报 `JobSkipped`）— rc#430、rc#285 | [x] |
+| 9 | **F17 Entry tags**：`WithTags`、`EntriesByTag` / `RemoveByTag` / `EnableByTag` / `DisableByTag` / `SetTags` — rc#307 | [x] |
+| 10 | **F20 `Metrics` 接口（`WithMetrics`：开始/延迟、完成/耗时、跳过）+ `JobRun.ScheduledAt` / `Triggered`** — rc#357 | [x] |
 
----
+顺手完成的小项：
+- [x] **F12** `@every` 立即执行 / 首次延迟：`doc.go` 补充 `RunOnStart`、`WithNext` 的用法，并加测试固定行为 — rc#406、rc#258、rc#297
+- [x] **F7** `TZ=UTC+8` / `UTC+05:30` / `GMT-5` / `+0900`（按 ISO 8601 东正西负，与 POSIX、`Etc/GMT+8` 相反）— rc#324、rc#379
 
-## 建议执行顺序
+暂不做（有明确需求再说）：
+- **F3** Jenkins 风格 `H` 哈希 — rc#309
+- **F5** 可选 Year 字段 — rc#340
+- **F18** 整个调度器 `Pause()/Resume()`（F17 按 tag 暂停可覆盖大部分场景）
 
-1. P0 全部（每项附回归测试，`go test -race` 通过）
-2. R1–R11
-3. P1–P9（先加 benchmark 再优化）
-4. F 系列按需挑选（推荐优先：F1/F2/F4、F11、F13、F14、F6）
+不做：
+- **F9** 亚秒级 `@every`：太小众，用 ticker 即可 — rc#178
+- **F10** `Describe(spec)` 人类可读描述：涉及多语言，适合独立包 — rc#229
+- **F19** 持久化 / 分布式锁：范围太大且绑定存储；最多只定义 `Locker` 接口，由用户实现 — rc#214、rc#428
+- **webadmin**：已移除，安全维护（XSS / CSRF / 认证）不属于调度库的职责
+
+测试补充（完成路线图后）：为原本没有测试的公开 API 补测试（`Chain`、`DelayIfStillRunning`、`WithJitter`、`ThresholdClb`、`WithSeconds`），补充功能组合场景（tag 限流 + `SetTags`、`MisfireRunAll` 跨 DST、`Trigger` + 并发限制），删除 webadmin 移除后的死代码（`ShortDur`、`ParallelForEach` 等）。压力测试 `go test -race -count=15 -shuffle=on ./...` 通过；主包覆盖率 98%+。
+
+## v1.0.0 发布准备（✔ 已完成）
+
+- [x] API 冻结前检查：移除 `Cron.Sub`（返回 internal 包类型）及 `internal/pubsub`；`Job1`…`Job31` / `Job1Wrapper`…`Job31Wrapper` 不再导出；`Enable` / `Disable` / `Remove` / `UpdateLabel` / `RemoveHook` / `EnableHook` / `DisableHook` / `SetHookLabel` 对未知 ID 返回错误；`Label` / `WithID` / `WithNext` 返回 `EntryOption`；补全错误与选项文档。保留 `WithClock(clockwork.Clock)`。
+- [x] `CHANGELOG.md` 整理为 `[v1.0.0]`（含从 v0.2.0 升级指南）。
+- [ ] 合并到默认分支后打 tag：`git tag v1.0.0 && git push origin v1.0.0`
+
+## P4 — v1.0 之后：长期维护
+
+- [x] `TestJobRunEvents` 偶发失败（v0.2.0 起就存在）：`JobRunCreatedCh` / `JobRunCompletedCh` 是无缓冲 channel + 非阻塞发送，事件大多被丢弃。改为首次调用时创建、带缓冲（100）的 channel，满了才丢弃；测试改为确定性断言。
+
+- bug 修复与性能优化为主，严格遵循语义化版本。
+- **时区数据**：各国夏令时政策会变，`doc.go` 已说明可 `import _ "time/tzdata"` 内嵌时区数据；DST 回归测试（`spec_dst_test.go`）已内嵌 tzdata。
+- **跟进 Go 新版本**：用 `testing/synctest` 替换 clockwork 依赖（Go 1.25+）。
+- **解析器 fuzz 测试**长期运行。
+- **从 robfig/cron 迁移指南**：列出行为差异。
