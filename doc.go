@@ -142,6 +142,24 @@ You may use one of several pre-defined schedules in place of a cron expression.
 	@daily (or @midnight)  | Run once a day, midnight                   | 0 0 * * *
 	@hourly                | Run once an hour, beginning of hour        | 0 * * * *
 
+# Missed activations
+
+An activation is missed when the cron was not running at that time, or could not run the job on
+time (eg: the machine was sleeping). The misfire policy, set for the cron (Builder.WithMisfirePolicy)
+or for an entry (WithMisfirePolicy), tells what to do:
+
+	Policy          | Missed while running | Missed while not running
+	------          | -------------------- | ------------------------
+	MisfireDefault  | run once             | skipped
+	MisfireSkip     | skipped              | skipped
+	MisfireRunOnce  | run once             | run once
+	MisfireRunAll   | each one runs        | each one runs
+
+MisfireSkip only skips the activations missed by more than the misfire threshold
+(Builder.WithMisfireThreshold, one minute by default). Activations explicitly set (RunOnStart,
+WithNext, AddJobAt) are never skipped. JobRun.ScheduledAt is the activation a run is for, and
+skipped activations are reported to Metrics.JobSkipped.
+
 # One-time jobs
 
 AddJobAt runs a job once, at a given time, then removes its entry:

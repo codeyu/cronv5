@@ -22,6 +22,9 @@ type Entry struct {
 	Label string
 	// Tags of the entry (see WithTags), to query or manage entries by group
 	Tags []string
+	// What to do with the activations missed by more than the misfire threshold (see WithMisfirePolicy).
+	// MisfireDefault uses the policy of the cron.
+	MisfirePolicy MisfirePolicy
 	// Either or not the job is currently active
 	Active bool
 	// The Job to run.

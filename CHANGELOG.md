@@ -16,6 +16,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   They can be listed with other items, eg: `0 0 1,15,L * *`. Specs using them were rejected before.
 - **Day of week `7` is Sunday**, as in Vixie cron (`5-7` is Friday to Sunday).
+- **Misfire policies**: `MisfireSkip`, `MisfireRunOnce` and `MisfireRunAll` tell what to do with the
+  activations missed while the cron was not running or could not run them on time, for the cron
+  (`Builder.WithMisfirePolicy`) or an entry (`WithMisfirePolicy`), with `Builder.WithMisfireThreshold`.
+  `MisfireDefault` keeps the previous behavior. Activations skipped when the cron starts are now logged
+  (and reported to `Metrics.JobSkipped`).
 - **Metrics**: `Builder.WithMetrics(m)` with the `Metrics` interface (`JobStarted` with the delay since
   the scheduled time, `JobCompleted` with the duration, `JobSkipped`), and `BaseMetrics` to embed.
   `JobRun.ScheduledAt` is the activation time a run is for, `JobRun.Triggered` tells if it was started

@@ -49,6 +49,8 @@ type Cron struct {
 	maxLogSize           int                                          // Maximum size in bytes of the logs kept per job run (0 = unlimited)
 	keepJobsOnStop       bool                                         // Stop does not cancel the context of the running jobs
 	metrics              Metrics                                      // Receives the measurements of the job runs (nil = none)
+	misfirePolicy        MisfirePolicy                                // Policy of the entries using MisfireDefault
+	misfireThreshold     time.Duration                                // An activation is missed when it runs later than this
 	cleanupNowCh         chan struct{}                                // Channel to trigger immediate cleanup of completed job runs
 	lastCleanupTS        mtx.Mtx[time.Time]                           // Timestamp of last completed job runs cleanup (thread-safe)
 	hooks                mtx.RWMtx[hooksContainer]                    // Thread-safe container for managing job hooks (both global and entry-specific)
@@ -251,6 +253,8 @@ type Builder struct {
 	maxLogSize           int
 	keepJobsOnStop       bool
 	metrics              Metrics
+	misfirePolicy        MisfirePolicy
+	misfireThreshold     *time.Duration
 	logger               Logger
 	ctx                  context.Context
 }
@@ -366,6 +370,8 @@ func (b *Builder) Build() *Cron {
 		maxLogSize:           b.maxLogSize,
 		keepJobsOnStop:       b.keepJobsOnStop,
 		metrics:              b.metrics,
+		misfirePolicy:        b.misfirePolicy,
+		misfireThreshold:     utils.Default(b.misfireThreshold, defaultMisfireThreshold),
 		cleanupNowCh:         make(chan struct{}, 1),
 		hooks: mtx.NewRWMtx(hooksContainer{
 			hooksMap:       make(map[HookID]hookMeta),
@@ -1195,20 +1201,36 @@ func (c *Cron) runDueEntries() {
 		ptr      *Entry // To check that the entry was not removed/replaced in the meantime
 		snapshot Entry
 	}
-	var due []dueEntry
+	var (
+		due     []dueEntry
+		skipped []skippedActivation
+	)
 	c.entries.With(func(entries *entries) {
-		for {
+		for len(due) < maxRunsPerPass { // The remaining runs start at the next pass, right after this one
 			entry := entries.heap.Peek()
 			if entry == nil || entry.Next.After(now) || entry.Next.IsZero() || !entry.Active {
 				break
 			}
-			entry.Prev = entry.Next
-			entry.Next = entry.Schedule.Next(now)
+			scheduled, pinned := entry.Next, entry.pinnedNext
 			entry.pinnedNext = false
+			policy := c.misfirePolicyOf(entry)
+			switch {
+			case !pinned && policy == MisfireSkip && now.Sub(scheduled) > c.misfireThreshold:
+				entry.Next = entry.Schedule.Next(now)
+				entries.heap.Fix(0)
+				skipped = append(skipped, skippedActivation{entry.snapshot(), scheduled, SkipMisfire})
+				continue
+			case !pinned && policy == MisfireRunAll:
+				entry.Next = entry.Schedule.Next(scheduled) // The next missed activation, if any
+			default:
+				entry.Next = entry.Schedule.Next(now)
+			}
+			entry.Prev = scheduled
 			entries.heap.Fix(0)
 			due = append(due, dueEntry{entry, entry.snapshot()})
 		}
 	})
+	c.reportSkipped(skipped)
 	if len(due) == 0 {
 		return
 	}
@@ -1257,16 +1279,32 @@ func (c *Cron) setEntriesNext() {
 // refreshStaleEntries recompute the "Next" of the entries that are in the past when the cron is started,
 // so that jobs added long before calling Start (or before a Stop) do not all run immediately.
 // Entries with an explicitly set "Next" (RunOnStart, WithNext, RunNow) are left untouched.
+//
+// What happens to the activations missed while the cron was not running depends on the misfire policy:
+// with MisfireDefault they are skipped, with MisfireSkip only those missed by more than the misfire
+// threshold are, and with MisfireRunOnce / MisfireRunAll they are left to the scheduler loop.
 func (c *Cron) refreshStaleEntries() {
 	now := c.now()
+	var skipped []skippedActivation
 	c.entries.With(func(entries *entries) {
 		for _, entry := range entries.heap.entries {
-			if entry.Active && !entry.pinnedNext && !entry.Next.IsZero() && entry.Next.Before(now) {
-				entry.Next = entry.Schedule.Next(now)
+			if !entry.Active || entry.pinnedNext || entry.Next.IsZero() || !entry.Next.Before(now) {
+				continue
 			}
+			switch c.misfirePolicyOf(entry) {
+			case MisfireRunOnce, MisfireRunAll:
+				continue
+			case MisfireSkip:
+				if now.Sub(entry.Next) <= c.misfireThreshold {
+					continue
+				}
+			}
+			skipped = append(skipped, skippedActivation{entry.snapshot(), entry.Next, SkipMisfire})
+			entry.Next = entry.Schedule.Next(now)
 		}
 		entries.heap.Init()
 	})
+	c.reportSkipped(skipped)
 }
 
 func (c *Cron) remove(id EntryID) {
