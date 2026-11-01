@@ -130,7 +130,7 @@
 | 6 | **F13 错过执行的补偿策略**：休眠/阻塞后"跳过 / 补跑一次 / 全部补跑" | [ ] |
 | 7 | **F14 `WithRetry` 指数退避 + 抖动 + 自定义重试判断** — rc#560 | [ ] |
 | 8 | **F15 并发限制**（全局 / 按标签），`SkipIfStillRunning` 可作为 EntryOption — rc#430、rc#285 | [ ] |
-| 9 | **F17 Entry tag/metadata**，按 tag 查询 / 删除 / 暂停 — rc#307 | [ ] |
+| 9 | **F17 Entry tags**：`WithTags`、`EntriesByTag` / `RemoveByTag` / `EnableByTag` / `DisableByTag` / `SetTags` — rc#307 | [x] |
 | 10 | **F20 Metrics 钩子 + `JobRun.ScheduledAt`** — rc#357 | [ ] |
 
 顺手完成的小项：

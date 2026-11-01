@@ -59,7 +59,7 @@ func (h *entryHeap) Entries() []Entry {
 	slices.SortFunc(sorted, compareEntries)
 	out := make([]Entry, len(sorted))
 	for i, entry := range sorted {
-		out[i] = *entry
+		out[i] = entry.snapshot()
 	}
 	return out
 }

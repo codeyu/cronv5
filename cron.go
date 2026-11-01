@@ -522,6 +522,22 @@ func (c *Cron) Entry(id EntryID) (Entry, error) { return c.getEntry(id) }
 // Running jobs of the entry are cancelled, and the hooks specific to the entry are removed.
 func (c *Cron) Remove(id EntryID) { c.remove(id) }
 
+// EntriesByTag returns a snapshot of the entries having the given tag, sorted like Entries
+func (c *Cron) EntriesByTag(tag string) []Entry { return c.entriesByTag(tag) }
+
+// RemoveByTag removes the entries having the given tag (as Remove does), and returns how many were removed
+func (c *Cron) RemoveByTag(tag string) int { return c.forEachTagged(tag, c.remove) }
+
+// EnableByTag enables the entries having the given tag, and returns how many entries have the tag
+func (c *Cron) EnableByTag(tag string) int { return c.forEachTagged(tag, c.Enable) }
+
+// DisableByTag disables the entries having the given tag, and returns how many entries have the tag
+func (c *Cron) DisableByTag(tag string) int { return c.forEachTagged(tag, c.Disable) }
+
+// SetTags replaces the tags of an entry. The concurrency limits of the tags (WithTagConcurrencyLimit)
+// apply to the runs started after the change.
+func (c *Cron) SetTags(id EntryID, tags ...string) error { return c.setTags(id, tags) }
+
 // RunNow runs the job of the entry now, as Trigger does, without returning the RunID.
 //
 // If the cron is not running, the job runs as soon as the cron is started
@@ -853,7 +869,7 @@ func (c *Cron) getHook(id HookID) (out Hook, err error) {
 }
 
 func (c *Cron) getEntry(id EntryID) (out Entry, err error) {
-	err = c.entryRClb(id, func(entry *Entry) { out = *entry })
+	err = c.entryRClb(id, func(entry *Entry) { out = entry.snapshot() })
 	return out, err
 }
 
@@ -963,6 +979,32 @@ func (c *Cron) addEntry(entry Entry, opts ...EntryOption) (EntryID, error) {
 	return entry.ID, nil
 }
 
+func (c *Cron) entriesByTag(tag string) []Entry {
+	return slices.DeleteFunc(c.getEntries(), func(e Entry) bool { return !e.HasTag(tag) })
+}
+
+// forEachTagged calls fn with the ID of each entry having the given tag (without holding the lock)
+func (c *Cron) forEachTagged(tag string, fn func(EntryID)) int {
+	var ids []EntryID
+	c.entries.RWith(func(entries entries) {
+		for id, entry := range entries.entriesMap {
+			if entry.HasTag(tag) {
+				ids = append(ids, id)
+			}
+		}
+	})
+	for _, id := range ids {
+		fn(id)
+	}
+	return len(ids)
+}
+
+func (c *Cron) setTags(id EntryID, tags []string) error {
+	return c.entries.WithE(func(entries *entries) error {
+		return lookupErrClb(entries.entriesMap, id, func(entry *Entry) { entry.Tags = mergeTags(nil, tags) }, ErrEntryNotFound)
+	})
+}
+
 func (c *Cron) updateLabel(id EntryID, label string) {
 	c.entries.With(func(entries *entries) {
 		if entry, ok := entries.entriesMap[id]; ok {
@@ -1020,7 +1062,7 @@ func (c *Cron) trigger(id EntryID) (RunID, error) {
 			return ErrEntryNotFound
 		}
 		entry.Prev = c.now()
-		ptr, snapshot = entry, *entry
+		ptr, snapshot = entry, entry.snapshot()
 		return nil
 	}); err != nil {
 		return "", err
@@ -1160,7 +1202,7 @@ func (c *Cron) runDueEntries() {
 			entry.Next = entry.Schedule.Next(now)
 			entry.pinnedNext = false
 			entries.heap.Fix(0)
-			due = append(due, dueEntry{entry, *entry})
+			due = append(due, dueEntry{entry, entry.snapshot()})
 		}
 	})
 	if len(due) == 0 {

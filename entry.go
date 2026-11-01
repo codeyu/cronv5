@@ -1,6 +1,7 @@
 package cron
 
 import (
+	"slices"
 	"time"
 )
 
@@ -19,6 +20,8 @@ type Entry struct {
 	Prev time.Time
 	// Label to describe the job
 	Label string
+	// Tags of the entry (see WithTags), to query or manage entries by group
+	Tags []string
 	// Either or not the job is currently active
 	Active bool
 	// The Job to run.
@@ -44,7 +47,39 @@ func (e Entry) Job() any {
 	return e.job
 }
 
+// snapshot returns a copy of the entry that does not share memory with it
+func (e *Entry) snapshot() Entry {
+	out := *e
+	out.Tags = slices.Clone(e.Tags)
+	return out
+}
+
+// HasTag returns true if the entry has the given tag
+func (e Entry) HasTag(tag string) bool {
+	return slices.Contains(e.Tags, tag)
+}
+
 type EntryOption func(*Cron, *Entry)
+
+// WithTags adds tags to the entry, to query or manage entries by group
+// (EntriesByTag, RemoveByTag, EnableByTag, DisableByTag) or to limit their concurrency
+// (WithTagConcurrencyLimit). Duplicated and empty tags are ignored.
+func WithTags(tags ...string) EntryOption {
+	return func(_ *Cron, entry *Entry) {
+		entry.Tags = mergeTags(entry.Tags, tags)
+	}
+}
+
+// mergeTags returns a new slice with the tags of a then b, without duplicated or empty tags
+func mergeTags(a, b []string) []string {
+	out := make([]string, 0, len(a)+len(b))
+	for _, tag := range slices.Concat(a, b) {
+		if tag != "" && !slices.Contains(out, tag) {
+			out = append(out, tag)
+		}
+	}
+	return out
+}
 
 func Label(label string) func(*Cron, *Entry) {
 	return func(_ *Cron, entry *Entry) {
