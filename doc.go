@@ -56,9 +56,11 @@ and the day of week field becomes optional.
 	Seconds      | WithSeconds| 0-59            | * / , -
 	Minutes      | Yes        | 0-59            | * / , -
 	Hours        | Yes        | 0-23            | * / , -
-	Day of month | Yes        | 1-31            | * / , - ?
+	Day of month | Yes        | 1-31            | * / , - ? L W
 	Month        | Yes        | 1-12 or JAN-DEC | * / , -
-	Day of week  | Yes        | 0-6 or SUN-SAT  | * / , - ?
+	Day of week  | Yes        | 0-7 or SUN-SAT  | * / , - ? L #
+
+Day of week 0 and 7 are both Sunday (Vixie cron numbering; note that Quartz uses 1 for Sunday).
 
 Note: Month and Day-of-week field values are case insensitive. "SUN", "Sun",
 and "sun" are equally accepted.
@@ -94,10 +96,39 @@ Hyphen ( - )
 Hyphens are used to define ranges. For example, 9-17 would indicate every
 hour between 9am and 5pm inclusive.
 
+In the month and day of week fields, a range can wrap around: "FRI-MON" is Friday,
+Saturday, Sunday and Monday, "NOV-FEB" is November to February. The other fields
+reject a range whose beginning is after its end.
+
 Question mark ( ? )
 
 Question mark may be used instead of '*' for leaving either day-of-month or
 day-of-week blank.
+
+L, W and # (day of month and day of week)
+
+These items depend on the month, they can be combined with other items in a list
+(eg: "1,15,L"), but not in a range or with an increment.
+
+	Item   | Field        | Meaning
+	----   | -----        | -------
+	L      | Day of month | Last day of the month
+	L-n    | Day of month | n days before the last day of the month (0-30), eg: L-2
+	LW     | Day of month | Last weekday (Monday to Friday) of the month
+	nW     | Day of month | Weekday nearest to the n-th day of the month, eg: 15W
+	dL     | Day of week  | Last day d of the month, eg: 5L or FRIL (last Friday)
+	d#k    | Day of week  | k-th day d of the month (1-5), eg: MON#1 (first Monday)
+
+"nW" never leaves the month: when the 1st is a Saturday, "1W" is Monday the 3rd, and
+when the 31st is a Sunday, "31W" is Friday the 29th. It does not activate in months
+that have no n-th day (eg: "31W" in April).
+
+"L" alone in the day of week field is rejected, as its meaning differs between cron
+implementations: use 6 (or SAT) for Saturday, or 5L for the last Friday of the month.
+
+As for other items, when both the day of month and day of week fields are restricted
+(neither is '*' or '?'), the schedule activates on days matching either one:
+"0 0 L * MON#1" activates on the first Monday and on the last day of every month.
 
 # Predefined schedules
 

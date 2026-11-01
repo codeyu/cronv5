@@ -126,36 +126,26 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 		return nil, err
 	}
 
-	field := func(field string, r bounds) uint64 {
+	sched := &SpecSchedule{Location: loc}
+	field := func(field string, r bounds, special specialItemParser) uint64 {
 		if err != nil {
 			return 0
 		}
 		var bits uint64
-		bits, err = getField(field, r)
+		bits, err = getFieldWith(field, r, &sched.days, special)
 		return bits
 	}
 
-	var (
-		second     = field(fields[0], seconds)
-		minute     = field(fields[1], minutes)
-		hour       = field(fields[2], hours)
-		dayofmonth = field(fields[3], dom)
-		month      = field(fields[4], months)
-		dayofweek  = field(fields[5], dow)
-	)
+	sched.Second = field(fields[0], seconds, nil)
+	sched.Minute = field(fields[1], minutes, nil)
+	sched.Hour = field(fields[2], hours, nil)
+	sched.Dom = field(fields[3], dom, parseDomItem)
+	sched.Month = field(fields[4], months, nil)
+	sched.Dow = field(fields[5], dow, parseDowItem)
 	if err != nil {
 		return nil, err
 	}
-
-	return &SpecSchedule{
-		Second:   second,
-		Minute:   minute,
-		Hour:     hour,
-		Dom:      dayofmonth,
-		Month:    month,
-		Dow:      dayofweek,
-		Location: loc,
-	}, nil
+	return sched, nil
 }
 
 // locationCache caches time.LoadLocation, which reads the tz database on every call.
@@ -256,9 +246,24 @@ func ParseStandard(standardSpec string) (Schedule, error) {
 // the field represents or error parsing field value.  A "field" is a comma-separated
 // list of "ranges".
 func getField(field string, r bounds) (uint64, error) {
+	return getFieldWith(field, r, nil, nil)
+}
+
+// specialItemParser parses the items of a field that cannot be represented as bits
+// (eg: "L", "15W", "MON#2") into days. It returns false if expr is not such an item.
+type specialItemParser func(expr string, days *dayRules) (bool, error)
+
+func getFieldWith(field string, r bounds, days *dayRules, special specialItemParser) (uint64, error) {
 	var bits uint64
 	ranges := strings.FieldsFunc(field, func(r rune) bool { return r == ',' })
 	for _, expr := range ranges {
+		if special != nil && strings.ContainsAny(expr, "LlWw#") {
+			if ok, err := special(expr, days); err != nil {
+				return bits, err
+			} else if ok {
+				continue
+			}
+		}
 		bit, err := getRange(expr, r)
 		if err != nil {
 			return bits, err
@@ -266,6 +271,93 @@ func getField(field string, r bounds) (uint64, error) {
 		bits |= bit
 	}
 	return bits, nil
+}
+
+// parseDomItem parses the day-of-month items:
+//
+//	"L"   last day of the month
+//	"L-n" n days before the last day of the month (0 <= n <= 30)
+//	"LW"  last weekday (Monday to Friday) of the month
+//	"nW"  weekday nearest to the n-th day of the month, without leaving the month (1 <= n <= 31)
+func parseDomItem(expr string, days *dayRules) (bool, error) {
+	upper := strings.ToUpper(expr)
+	switch {
+	case upper == "L":
+		days.lastDom |= 1
+	case upper == "LW":
+		days.lastWeekdayDom = true
+	case strings.HasPrefix(upper, "L-"):
+		n, err := mustParseInt(expr[2:])
+		if err != nil {
+			return false, err
+		}
+		if n > 30 {
+			return false, fmt.Errorf("offset from the last day of the month (%d) above maximum (30): %s", n, expr)
+		}
+		days.lastDom |= 1 << n
+	case strings.HasSuffix(upper, "W"):
+		n, err := mustParseInt(expr[:len(expr)-1])
+		if err != nil {
+			return false, err
+		}
+		if n < dom.min || n > dom.max {
+			return false, fmt.Errorf("day of month (%d) out of range (%d-%d): %s", n, dom.min, dom.max, expr)
+		}
+		days.weekdayDom |= 1 << n
+	case strings.Contains(upper, "L"):
+		return false, fmt.Errorf("invalid use of L in day-of-month field: %s", expr)
+	default:
+		return false, nil
+	}
+	return true, nil
+}
+
+// parseDowItem parses the day-of-week items:
+//
+//	"d#k" k-th weekday d of the month (1 <= k <= 5), eg: "MON#1" or "1#1"
+//	"dL"  last weekday d of the month, eg: "FRIL" or "5L"
+func parseDowItem(expr string, days *dayRules) (bool, error) {
+	weekday := func(s string) (uint, error) {
+		d, err := parseIntOrName(s, dow.names)
+		if err != nil {
+			return 0, err
+		}
+		if d == 7 {
+			d = 0
+		}
+		if d > dow.max {
+			return 0, fmt.Errorf("day of week (%d) above maximum (7): %s", d, expr)
+		}
+		return d, nil
+	}
+	upper := strings.ToUpper(expr)
+	if before, after, ok := strings.Cut(upper, "#"); ok {
+		d, err := weekday(before)
+		if err != nil {
+			return false, err
+		}
+		k, err := mustParseInt(after)
+		if err != nil {
+			return false, err
+		}
+		if k < 1 || k > 5 {
+			return false, fmt.Errorf("occurrence of the day of week (%d) out of range (1-5): %s", k, expr)
+		}
+		days.nthDow[d] |= 1 << k
+		return true, nil
+	}
+	if upper == "L" {
+		return false, fmt.Errorf("L alone is ambiguous in day-of-week field, use 6 (or SAT) for Saturday or 5L for the last Friday: %s", expr)
+	}
+	if strings.HasSuffix(upper, "L") {
+		d, err := weekday(upper[:len(upper)-1])
+		if err != nil {
+			return false, err
+		}
+		days.lastDow |= 1 << d
+		return true, nil
+	}
+	return false, nil
 }
 
 // getRange returns the bits indicated by the given expression:
@@ -325,20 +417,54 @@ func getRange(expr string, r bounds) (uint64, error) {
 		return 0, fmt.Errorf("too many slashes: %s", expr)
 	}
 
+	maxValue := r.max
+	if r.sunday7 {
+		// 7 is Sunday: "7-2" is "0-2" (SUN-TUE), while "5-7" keeps 7 as the end of the range (FRI-SUN).
+		maxValue = 7
+		if start == 7 && end != 7 {
+			start = 0
+		}
+	}
 	if start < r.min {
 		return 0, fmt.Errorf("beginning of range (%d) below minimum (%d): %s", start, r.min, expr)
 	}
-	if end > r.max {
-		return 0, fmt.Errorf("end of range (%d) above maximum (%d): %s", end, r.max, expr)
+	if start > maxValue {
+		return 0, fmt.Errorf("beginning of range (%d) above maximum (%d): %s", start, maxValue, expr)
 	}
-	if start > end {
-		return 0, fmt.Errorf("beginning of range (%d) beyond end of range (%d): %s", start, end, expr)
+	if end > maxValue {
+		return 0, fmt.Errorf("end of range (%d) above maximum (%d): %s", end, maxValue, expr)
 	}
 	if step == 0 {
 		return 0, fmt.Errorf("step of range should be a positive number: %s", expr)
 	}
 
-	return getBits(start, end, step) | extra, nil
+	var bits uint64
+	if start > end {
+		if !r.cyclic || singleDigit {
+			return 0, fmt.Errorf("beginning of range (%d) beyond end of range (%d): %s", start, end, expr)
+		}
+		bits = getCyclicBits(start, end, step, r)
+	} else {
+		bits = getBits(start, end, step)
+	}
+	if r.sunday7 && bits&(1<<7) != 0 {
+		bits = bits&^(1<<7) | 1<<0
+	}
+	return bits | extra, nil
+}
+
+// getCyclicBits sets the bits of a range wrapping around the end of the field,
+// eg: "FRI-MON" (5-1) is FRI, SAT, SUN, MON, modulo the given step size.
+func getCyclicBits(start, end, step uint, r bounds) uint64 {
+	var (
+		bits   uint64
+		size   = r.max - r.min + 1
+		length = (end+size-start)%size + 1
+	)
+	for i := uint(0); i < length; i += step {
+		bits |= 1 << (r.min + (start-r.min+i)%size)
+	}
+	return bits
 }
 
 // parseIntOrName returns the (possibly-named) integer contained in expr.

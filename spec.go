@@ -9,21 +9,43 @@ type SpecSchedule struct {
 
 	// Override location for this schedule.
 	Location *time.Location
+
+	// Day rules that cannot be represented as bit sets ("L", "W", "#").
+	days dayRules
 }
+
+// dayRules holds the day-of-month and day-of-week items that depend on the month
+// (its length, or the weekday it starts on). They match in addition to the bits
+// set in Dom and Dow.
+type dayRules struct {
+	lastDom        uint32   // bit n: "L-n" (n days before the last day of the month, "L" is "L-0")
+	weekdayDom     uint32   // bit n: "nW" (weekday nearest to the n-th day of the month)
+	lastWeekdayDom bool     // "LW" (last weekday of the month)
+	nthDow         [7]uint8 // bit k of nthDow[d]: "d#k" (k-th weekday d of the month)
+	lastDow        uint8    // bit d: "dL" (last weekday d of the month)
+}
+
+func (r dayRules) hasDom() bool { return r.lastDom != 0 || r.weekdayDom != 0 || r.lastWeekdayDom }
+
+func (r dayRules) hasDow() bool { return r.lastDow != 0 || r.nthDow != [7]uint8{} }
 
 // bounds provides a range of acceptable values (plus a map of name to value).
 type bounds struct {
 	min, max uint
 	names    map[string]uint
+	// cyclic fields accept ranges that wrap around, eg: "FRI-MON" or "NOV-FEB".
+	cyclic bool
+	// sunday7 accepts 7 as an alias of 0 (Sunday), as Vixie cron does.
+	sunday7 bool
 }
 
 // The bounds for each field.
 var (
-	seconds = bounds{0, 59, nil}
-	minutes = bounds{0, 59, nil}
-	hours   = bounds{0, 23, nil}
-	dom     = bounds{1, 31, nil}
-	months  = bounds{1, 12, map[string]uint{
+	seconds = bounds{min: 0, max: 59}
+	minutes = bounds{min: 0, max: 59}
+	hours   = bounds{min: 0, max: 23}
+	dom     = bounds{min: 1, max: 31}
+	months  = bounds{min: 1, max: 12, cyclic: true, names: map[string]uint{
 		"jan": 1,
 		"feb": 2,
 		"mar": 3,
@@ -37,7 +59,7 @@ var (
 		"nov": 11,
 		"dec": 12,
 	}}
-	dow = bounds{0, 6, map[string]uint{
+	dow = bounds{min: 0, max: 6, cyclic: true, sunday7: true, names: map[string]uint{
 		"sun": 0,
 		"mon": 1,
 		"tue": 2,
@@ -178,11 +200,76 @@ WRAP:
 // restrictions are satisfied by the given time.
 func dayMatches(s *SpecSchedule, t time.Time) bool {
 	var (
-		domMatch bool = 1<<uint(t.Day())&s.Dom > 0
-		dowMatch bool = 1<<uint(t.Weekday())&s.Dow > 0
+		domMatch = 1<<uint(t.Day())&s.Dom > 0 || (s.days.hasDom() && s.days.domMatches(t))
+		dowMatch = 1<<uint(t.Weekday())&s.Dow > 0 || (s.days.hasDow() && s.days.dowMatches(t))
 	)
 	if s.Dom&starBit > 0 || s.Dow&starBit > 0 {
 		return domMatch && dowMatch
 	}
 	return domMatch || dowMatch
+}
+
+// daysIn returns the number of days in the month of t.
+func daysIn(t time.Time) int {
+	return time.Date(t.Year(), t.Month()+1, 0, 0, 0, 0, 0, time.UTC).Day()
+}
+
+// weekdayOf returns the weekday of the given day of the month of t.
+func weekdayOf(t time.Time, day int) time.Weekday {
+	return time.Date(t.Year(), t.Month(), day, 0, 0, 0, 0, time.UTC).Weekday()
+}
+
+// nearestWeekday returns the weekday (Monday to Friday) nearest to the given day,
+// without leaving the month (Quartz "W" semantics): Saturday the 1st gives Monday
+// the 3rd, Sunday the 31st gives Friday the 29th.
+func nearestWeekday(t time.Time, day, last int) int {
+	switch weekdayOf(t, day) {
+	case time.Saturday:
+		if day == 1 {
+			return day + 2
+		}
+		return day - 1
+	case time.Sunday:
+		if day == last {
+			return day - 2
+		}
+		return day + 1
+	}
+	return day
+}
+
+func (r dayRules) domMatches(t time.Time) bool {
+	day, last := t.Day(), daysIn(t)
+	if offset := last - day; offset < 32 && r.lastDom&(1<<offset) != 0 {
+		return true
+	}
+	if r.lastWeekdayDom && nearestWeekdayBefore(t, last) == day {
+		return true
+	}
+	// The weekday nearest to n is at most 2 days away from n.
+	for n := max(1, day-2); n <= min(last, day+2); n++ {
+		if r.weekdayDom&(1<<n) != 0 && nearestWeekday(t, n, last) == day {
+			return true
+		}
+	}
+	return false
+}
+
+// nearestWeekdayBefore returns the last weekday (Monday to Friday) on or before the given day.
+func nearestWeekdayBefore(t time.Time, day int) int {
+	switch weekdayOf(t, day) {
+	case time.Saturday:
+		return day - 1
+	case time.Sunday:
+		return day - 2
+	}
+	return day
+}
+
+func (r dayRules) dowMatches(t time.Time) bool {
+	wd, day := t.Weekday(), t.Day()
+	if r.nthDow[wd]&(1<<((day-1)/7+1)) != 0 {
+		return true
+	}
+	return r.lastDow&(1<<wd) != 0 && day+7 > daysIn(t)
 }

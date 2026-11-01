@@ -45,7 +45,7 @@ func TestRange(t *testing.T) {
 	}
 
 	for _, c := range ranges {
-		actual, err := getRange(c.expr, bounds{c.min, c.max, nil})
+		actual, err := getRange(c.expr, bounds{min: c.min, max: c.max})
 		if len(c.err) != 0 && (err == nil || !strings.Contains(err.Error(), c.err)) {
 			t.Errorf("%s => expected %v, got %v", c.expr, c.err, err)
 		}
@@ -71,7 +71,7 @@ func TestField(t *testing.T) {
 	}
 
 	for _, c := range fields {
-		actual, _ := getField(c.expr, bounds{c.min, c.max, nil})
+		actual, _ := getField(c.expr, bounds{min: c.min, max: c.max})
 		if actual != c.expected {
 			t.Errorf("%s => expected %d, got %d", c.expr, c.expected, actual)
 		}
@@ -337,7 +337,7 @@ func TestStandardSpecSchedule(t *testing.T) {
 	}{
 		{
 			expr:     "5 * * * *",
-			expected: &SpecSchedule{1 << seconds.min, 1 << 5, all(hours), all(dom), all(months), all(dow), time.Local},
+			expected: &SpecSchedule{Second: 1 << seconds.min, Minute: 1 << 5, Hour: all(hours), Dom: all(dom), Month: all(months), Dow: all(dow), Location: time.Local},
 		},
 		{
 			expr:     "@every 5m",
@@ -376,15 +376,15 @@ func TestNoDescriptorParser(t *testing.T) {
 }
 
 func every5min(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1 << 0, 1 << 5, all(hours), all(dom), all(months), all(dow), loc}
+	return &SpecSchedule{Second: 1 << 0, Minute: 1 << 5, Hour: all(hours), Dom: all(dom), Month: all(months), Dow: all(dow), Location: loc}
 }
 
 func every5min5s(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1 << 5, 1 << 5, all(hours), all(dom), all(months), all(dow), loc}
+	return &SpecSchedule{Second: 1 << 5, Minute: 1 << 5, Hour: all(hours), Dom: all(dom), Month: all(months), Dow: all(dow), Location: loc}
 }
 
 func midnight(loc *time.Location) *SpecSchedule {
-	return &SpecSchedule{1, 1, 1, all(dom), all(months), all(dow), loc}
+	return &SpecSchedule{Second: 1, Minute: 1, Hour: 1, Dom: all(dom), Month: all(months), Dow: all(dow), Location: loc}
 }
 
 func annual(loc *time.Location) *SpecSchedule {
@@ -397,4 +397,26 @@ func annual(loc *time.Location) *SpecSchedule {
 		Dow:      all(dow),
 		Location: loc,
 	}
+}
+
+// FuzzParse checks that parsing arbitrary specs never panics, and that the
+// next activation of a valid spec is after the given time.
+func FuzzParse(f *testing.F) {
+	for _, spec := range []string{
+		"* * * * *", "0 0 L * *", "0 0 L-3 * *", "0 0 LW * *", "0 0 15W * *",
+		"0 0 * * MON#2", "0 0 * * 5L", "0 0 * * 5-7", "0 0 * * FRI-MON/2", "0 0 1 NOV-FEB *",
+		"TZ=UTC 0 0 1,L * 7", "@every 1h", "0 */5 9-17 ? * 1-5",
+	} {
+		f.Add(spec)
+	}
+	from := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	f.Fuzz(func(t *testing.T, spec string) {
+		sched, err := ParseStandard(spec)
+		if err != nil {
+			return
+		}
+		if next := sched.Next(from); !next.IsZero() && !next.After(from) {
+			t.Fatalf("%q: next activation %v is not after %v", spec, next, from)
+		}
+	})
 }

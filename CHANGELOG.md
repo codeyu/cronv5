@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Month dependent day items** in cron specs (Quartz syntax):
+  - day of month: `L` (last day), `L-n` (n days before the last day), `LW` (last weekday),
+    `nW` (weekday nearest to the n-th);
+  - day of week: `MON#2` / `1#2` (second Monday of the month), `5L` / `FRIL` (last Friday of the month).
+
+  They can be listed with other items, eg: `0 0 1,15,L * *`. Specs using them were rejected before.
+- **Day of week `7` is Sunday**, as in Vixie cron (`5-7` is Friday to Sunday).
+- **Ranges wrapping around** in the month and day of week fields: `FRI-MON`, `NOV-FEB`, `FRI-TUE/2`.
+  They were rejected before ("beginning of range beyond end of range").
+
+### Changed
+
+- `SpecSchedule` has a new unexported field. Code building a `SpecSchedule` with an unkeyed
+  struct literal (`SpecSchedule{1, 1, ...}`) must use field names (`SpecSchedule{Second: 1, ...}`).
+
 ### Removed
 
 - **The `webadmin` package was removed.** It was the only part of the module serving HTTP, and keeping it
