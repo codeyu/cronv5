@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   They can be listed with other items, eg: `0 0 1,15,L * *`. Specs using them were rejected before.
 - **Day of week `7` is Sunday**, as in Vixie cron (`5-7` is Friday to Sunday).
+- **Concurrency limits**: `Builder.WithMaxConcurrentJobs(n)` and `Builder.WithTagConcurrencyLimit(tag, n)`
+  (runs over a limit wait for a slot; a run cancelled while waiting completes with the context error,
+  without starting), and the `NoOverlap` entry option (`Entry.NoOverlap`), skipping the activations
+  happening while a previous run of the entry is still running.
 - **Misfire policies**: `MisfireSkip`, `MisfireRunOnce` and `MisfireRunAll` tell what to do with the
   activations missed while the cron was not running or could not run them on time, for the cron
   (`Builder.WithMisfirePolicy`) or an entry (`WithMisfirePolicy`), with `Builder.WithMisfireThreshold`.

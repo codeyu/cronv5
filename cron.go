@@ -51,6 +51,7 @@ type Cron struct {
 	metrics              Metrics                                      // Receives the measurements of the job runs (nil = none)
 	misfirePolicy        MisfirePolicy                                // Policy of the entries using MisfireDefault
 	misfireThreshold     time.Duration                                // An activation is missed when it runs later than this
+	limits               concurrencyLimits                            // Concurrency limits of the job runs
 	cleanupNowCh         chan struct{}                                // Channel to trigger immediate cleanup of completed job runs
 	lastCleanupTS        mtx.Mtx[time.Time]                           // Timestamp of last completed job runs cleanup (thread-safe)
 	hooks                mtx.RWMtx[hooksContainer]                    // Thread-safe container for managing job hooks (both global and entry-specific)
@@ -255,6 +256,8 @@ type Builder struct {
 	metrics              Metrics
 	misfirePolicy        MisfirePolicy
 	misfireThreshold     *time.Duration
+	maxConcurrentJobs    int
+	tagLimits            map[string]int
 	logger               Logger
 	ctx                  context.Context
 }
@@ -372,6 +375,7 @@ func (b *Builder) Build() *Cron {
 		metrics:              b.metrics,
 		misfirePolicy:        b.misfirePolicy,
 		misfireThreshold:     utils.Default(b.misfireThreshold, defaultMisfireThreshold),
+		limits:               newConcurrencyLimits(b.maxConcurrentJobs, b.tagLimits),
 		cleanupNowCh:         make(chan struct{}, 1),
 		hooks: mtx.NewRWMtx(hooksContainer{
 			hooksMap:       make(map[HookID]hookMeta),
@@ -1082,13 +1086,20 @@ func (c *Cron) trigger(id EntryID) (RunID, error) {
 	err := ErrEntryNotFound
 	// Start the run while holding the read lock, so it cannot race with removeEntry
 	c.entries.RWith(func(entries entries) {
-		if entries.entriesMap[id] == ptr {
+		switch {
+		case entries.entriesMap[id] != ptr:
+		case snapshot.NoOverlap && c.entryIsRunning(id):
+			err = ErrJobAlreadyRunning
+		default:
 			c.startJob(jobRun)
 			err = nil
 		}
 	})
 	if err != nil {
 		jobRun.cancel()
+		if errors.Is(err, ErrJobAlreadyRunning) {
+			c.reportSkipped([]skippedActivation{{snapshot, jobRun.scheduledAt, SkipStillRunning}})
+		}
 		return "", err
 	}
 	return jobRun.runID, nil
@@ -1242,15 +1253,21 @@ func (c *Cron) runDueEntries() {
 		runs[i].scheduledAt = d.snapshot.Prev
 	}
 	// Start the runs while holding the read lock, so they cannot race with removeEntry
+	skipped = skipped[:0]
 	c.entries.RWith(func(entries entries) {
 		for i, jobRun := range runs {
-			if entries.entriesMap[jobRun.entry.ID] == due[i].ptr {
-				c.startJob(jobRun)
-			} else {
+			switch {
+			case entries.entriesMap[jobRun.entry.ID] != due[i].ptr:
 				jobRun.cancel()
+			case jobRun.entry.NoOverlap && c.entryIsRunning(jobRun.entry.ID):
+				jobRun.cancel()
+				skipped = append(skipped, skippedActivation{jobRun.entry, jobRun.scheduledAt, SkipStillRunning})
+			default:
+				c.startJob(jobRun)
 			}
 		}
 	})
+	c.reportSkipped(skipped)
 }
 
 func (c *Cron) getLocation() *time.Location {
@@ -1496,8 +1513,22 @@ func (c *Cron) startJob(jobRun *jobRunStruct) {
 			c.signalJobCompleted()
 		}()
 		utils.NonBlockingSend(c.jobRunCreatedCh, jobRun.export())
+		release, err := c.limits.acquire(jobRun.ctx, jobRun.entry.Tags)
+		if err != nil { // Cancelled while waiting for a concurrency limit
+			c.cancelledBeforeStart(jobRun, err)
+			return
+		}
+		defer release()
 		c.runWithRecovery(jobRun)
 	}()
+}
+
+// cancelledBeforeStart completes a job run cancelled before the job started
+func (c *Cron) cancelledBeforeStart(jobRun *jobRunStruct, err error) {
+	c.logger.Info("job cancelled before starting", "label", jobRun.entry.Label, "entryID", jobRun.entry.ID, "runID", jobRun.runID, "error", err)
+	makeEventErr(c, jobRun, JobErr, err)
+	makeEvent(c, jobRun, JobCompleted)
+	c.withMetrics(func(m Metrics) { m.JobCompleted(jobRun.export(), 0) })
 }
 
 func (c *Cron) runWithRecovery(jobRun *jobRunStruct) {

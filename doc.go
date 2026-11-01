@@ -160,6 +160,17 @@ MisfireSkip only skips the activations missed by more than the misfire threshold
 WithNext, AddJobAt) are never skipped. JobRun.ScheduledAt is the activation a run is for, and
 skipped activations are reported to Metrics.JobSkipped.
 
+# Concurrency
+
+By default, a job runs at each activation even if its previous run is still running. The
+NoOverlap entry option skips the activations happening while a previous run is still running
+(reported to Metrics.JobSkipped). The number of jobs running at the same time can be limited for
+the whole cron (Builder.WithMaxConcurrentJobs) and for the entries having a tag
+(Builder.WithTagConcurrencyLimit): the runs over a limit wait for a running job to complete.
+
+	c := cron.New().WithMaxConcurrentJobs(10).WithTagConcurrencyLimit("db", 2).Build()
+	_, _ = c.AddJob("*\/5 * * * *", backup, cron.WithTags("db"), cron.NoOverlap)
+
 # One-time jobs
 
 AddJobAt runs a job once, at a given time, then removes its entry:

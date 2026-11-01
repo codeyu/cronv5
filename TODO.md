@@ -129,7 +129,7 @@
 | 5 | **F11 一次性任务 `AddJobAt(t, job)` / `At(t)` schedule**（过去的时间尽快执行，cron 未运行期间错过的在 Start 时执行）— rc#441、rc#302 | [x] |
 | 6 | **F13 Misfire 策略**：`MisfireSkip`（超过阈值才跳过，默认 1 分钟）/ `MisfireRunOnce` / `MisfireRunAll`，可按 cron 或 entry 设置；`MisfireDefault` 保持原行为 | [x] |
 | 7 | **F14 `WithRetry` 指数退避 + 抖动 + 自定义重试判断** — rc#560 | [ ] |
-| 8 | **F15 并发限制**（全局 / 按标签），`SkipIfStillRunning` 可作为 EntryOption — rc#430、rc#285 | [ ] |
+| 8 | **F15 并发限制**：`WithMaxConcurrentJobs`、`WithTagConcurrencyLimit`（超限排队等待），`NoOverlap` EntryOption（跳过并上报 `JobSkipped`）— rc#430、rc#285 | [x] |
 | 9 | **F17 Entry tags**：`WithTags`、`EntriesByTag` / `RemoveByTag` / `EnableByTag` / `DisableByTag` / `SetTags` — rc#307 | [x] |
 | 10 | **F20 `Metrics` 接口（`WithMetrics`：开始/延迟、完成/耗时、跳过）+ `JobRun.ScheduledAt` / `Triggered`** — rc#357 | [x] |
 

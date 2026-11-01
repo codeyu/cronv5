@@ -22,6 +22,8 @@ type Entry struct {
 	Label string
 	// Tags of the entry (see WithTags), to query or manage entries by group
 	Tags []string
+	// Skip the activations happening while a previous run of the entry is still running (see NoOverlap)
+	NoOverlap bool
 	// What to do with the activations missed by more than the misfire threshold (see WithMisfirePolicy).
 	// MisfireDefault uses the policy of the cron.
 	MisfirePolicy MisfirePolicy
@@ -106,6 +108,15 @@ func WithNext(next time.Time) func(*Cron, *Entry) {
 func RunOnStart(c *Cron, entry *Entry) {
 	entry.Next = c.now()
 	entry.pinnedNext = true
+}
+
+// NoOverlap skips the activations of the entry happening while a previous run of the entry is
+// still running (including a run waiting for a concurrency limit). The skipped activations are
+// reported to Metrics.JobSkipped, and Trigger returns ErrJobAlreadyRunning.
+//
+// Unlike the SkipIfStillRunning job wrapper, no job run is created for a skipped activation.
+func NoOverlap(_ *Cron, entry *Entry) {
+	entry.NoOverlap = true
 }
 
 func Disabled(_ *Cron, entry *Entry) {
