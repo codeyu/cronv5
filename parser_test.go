@@ -399,13 +399,14 @@ func annual(loc *time.Location) *SpecSchedule {
 	}
 }
 
-// FuzzParse checks that parsing arbitrary specs never panics, and that the
-// next activation of a valid spec is after the given time.
+// FuzzParse checks that parsing arbitrary specs never panics, that the next
+// activation of a valid spec is after the given time, and that Prev is the inverse of Next.
 func FuzzParse(f *testing.F) {
 	for _, spec := range []string{
 		"* * * * *", "0 0 L * *", "0 0 L-3 * *", "0 0 LW * *", "0 0 15W * *",
 		"0 0 * * MON#2", "0 0 * * 5L", "0 0 * * 5-7", "0 0 * * FRI-MON/2", "0 0 1 NOV-FEB *",
 		"TZ=UTC 0 0 1,L * 7", "@every 1h", "0 */5 9-17 ? * 1-5",
+		"TZ=America/New_York 30 2 * * *", "TZ=America/New_York */20 1 * * *", "CRON_TZ=Australia/Lord_Howe 15 2 * * *",
 	} {
 		f.Add(spec)
 	}
@@ -415,8 +416,18 @@ func FuzzParse(f *testing.F) {
 		if err != nil {
 			return
 		}
-		if next := sched.Next(from); !next.IsZero() && !next.After(from) {
+		next := sched.Next(from)
+		if next.IsZero() {
+			return
+		}
+		if !next.After(from) {
 			t.Fatalf("%q: next activation %v is not after %v", spec, next, from)
+		}
+		if spec, ok := sched.(*SpecSchedule); ok {
+			// Prev is the inverse of Next.
+			if prev := spec.Prev(next); !prev.IsZero() && (!prev.Before(next) || !spec.Next(prev).Equal(next)) {
+				t.Fatalf("%v: Prev(%v) = %v, Next(Prev) = %v", spec, next, prev, spec.Next(prev))
+			}
 		}
 	})
 }

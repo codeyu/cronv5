@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   They can be listed with other items, eg: `0 0 1,15,L * *`. Specs using them were rejected before.
 - **Day of week `7` is Sunday**, as in Vixie cron (`5-7` is Friday to Sunday).
+- **Activation times**: `SpecSchedule.Prev` returns the last activation before a given time
+  (the inverse of `Next`, DST transitions included), `NextN` and `Activations` (an `iter.Seq`)
+  list the next activation times of any `Schedule`, and `Cron.NextActivations` lists the next
+  activation times of an entry, in the cron location.
 - **Ranges wrapping around** in the month and day of week fields: `FRI-MON`, `NOV-FEB`, `FRI-TUE/2`.
   They were rejected before ("beginning of range beyond end of range").
 

@@ -10,6 +10,7 @@ Can add hooks callback to global JobEvent or entry specific events
 Can have a job that only run once using cron.Once  
 Can change the *time.Location while running  
 Cron specs support `L`, `L-n`, `LW`, `15W` (day of month), `MON#2`, `5L` (day of week), `7` as Sunday and wrapping ranges (`FRI-MON`)  
+List the next activation times with `cron.NextN(schedule, t, n)` / `c.NextActivations(id, n)`, and the previous one with `SpecSchedule.Prev`  
 Do not sort all entries at every iteration  
 Use Heap data structure to store entries  
 Can ask the cron object if a job is currently running with `isRunning := c.IsRunning(entryID)`  

@@ -142,6 +142,22 @@ You may use one of several pre-defined schedules in place of a cron expression.
 	@daily (or @midnight)  | Run once a day, midnight                   | 0 0 * * *
 	@hourly                | Run once an hour, beginning of hour        | 0 * * * *
 
+# Activation times
+
+The activation times of a schedule can be listed without running it:
+
+	sched, _ := cron.ParseStandard("0 9 * * MON-FRI")
+	next5 := cron.NextN(sched, time.Now(), 5) // the next 5 activation times
+	for t := range cron.Activations(sched, time.Now()) {
+		// successive activation times, until break
+	}
+	prev := sched.(*cron.SpecSchedule).Prev(time.Now()) // the last activation time
+
+For an entry of a Cron, NextActivations lists the next activation times in the cron location,
+starting with the entry's next activation time:
+
+	times, err := c.NextActivations(id, 5)
+
 # Intervals
 
 You may also schedule a job to execute at fixed intervals, starting at the time it's added

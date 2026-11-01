@@ -148,6 +148,133 @@ func (s *SpecSchedule) search(t, wall time.Time, loc *time.Location, interval bo
 	}
 }
 
+// Prev returns the last time this schedule was activated, before the given time
+// (the activation preceding t, as computed by Next). If no time can be found within
+// five years, it returns the zero time.
+func (s *SpecSchedule) Prev(t time.Time) time.Time {
+	origLocation := t.Location()
+	loc := s.Location
+	if loc == time.Local {
+		loc = t.Location()
+	}
+	t = t.In(loc)
+	interval := s.isInterval()
+
+	// Times during t's second are before t, unless t is on the second.
+	wall := asWall(t)
+	if t.Nanosecond() != 0 {
+		wall = wall.Add(time.Second)
+	}
+	yearLimit := wall.Year() - 5
+	prev := s.searchBack(t, wall, loc, interval, yearLimit)
+	// If t is during the second occurrence of repeated times (the clock went back), the first
+	// occurrence of times after t's wall clock time may come last.
+	if repeatedTo, ok := repeatedWallEnd(t); ok {
+		if other := s.searchBack(t, repeatedTo, loc, interval, yearLimit); other.After(prev) {
+			prev = other
+		}
+	}
+	if prev.IsZero() {
+		return prev
+	}
+	return prev.In(origLocation)
+}
+
+// searchBack returns the last activation before t, looking at the wall clock times before the given one.
+func (s *SpecSchedule) searchBack(t, wall time.Time, loc *time.Location, interval bool, yearLimit int) time.Time {
+	for {
+		wall = s.prevWall(wall, yearLimit)
+		if wall.IsZero() {
+			return time.Time{}
+		}
+		first, second, exists := instantsOf(wall, loc)
+		switch {
+		case !exists:
+			// first is the end of the jump.
+			if interval || !first.Before(t) {
+				// The times that do not exist are skipped, or run at the end of the jump, not before t:
+				// resume the search at the beginning of the jump.
+				wall = asWall(first.Add(-time.Second)).Add(time.Second)
+				continue
+			}
+		case interval && !second.IsZero() && second.Before(t):
+			first = second
+		case first.Before(t):
+		default:
+			continue
+		}
+		return first
+	}
+}
+
+// repeatedWallEnd returns, if t is during the second occurrence of repeated times (the clock
+// went back), the wall clock time just after the repeated times.
+func repeatedWallEnd(t time.Time) (time.Time, bool) {
+	start, _ := t.ZoneBounds()
+	if start.IsZero() {
+		return time.Time{}, false
+	}
+	_, offset := t.Zone()
+	_, prevOffset := start.Add(-time.Second).Zone()
+	if back := time.Duration(prevOffset-offset) * time.Second; back > 0 && t.Before(start.Add(back)) {
+		return asWall(start.Add(-time.Second)).Add(time.Second), true
+	}
+	return time.Time{}, false
+}
+
+// prevWall returns the last wall clock time before the given one (both as times in UTC)
+// matching the schedule, or the zero time if there is none until yearLimit.
+// It mirrors nextWall: when a field does not match, it is decremented (and the lower
+// fields set to their maximum) until it matches.
+func (s *SpecSchedule) prevWall(t time.Time, yearLimit int) time.Time {
+	// Start at the latest possible time (the previous second).
+	t = t.Truncate(time.Second).Add(-time.Second)
+
+WRAP:
+	if t.Year() < yearLimit {
+		return time.Time{}
+	}
+
+	for 1<<uint(t.Month())&s.Month == 0 {
+		// Last second of the previous month.
+		t = time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC).Add(-time.Second)
+		if t.Month() == time.December {
+			goto WRAP
+		}
+	}
+
+	for !dayMatches(s, t) {
+		// Last second of the previous day.
+		t = time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC).Add(-time.Second)
+		if t.Day() == daysIn(t) {
+			goto WRAP
+		}
+	}
+
+	for 1<<uint(t.Hour())&s.Hour == 0 {
+		t = t.Truncate(time.Hour).Add(-time.Second)
+		if t.Hour() == 23 {
+			goto WRAP
+		}
+	}
+
+	for 1<<uint(t.Minute())&s.Minute == 0 {
+		t = t.Truncate(time.Minute).Add(-time.Second)
+		if t.Minute() == 59 {
+			goto WRAP
+		}
+	}
+
+	for 1<<uint(t.Second())&s.Second == 0 {
+		t = t.Add(-time.Second)
+		if t.Second() == 59 {
+			goto WRAP
+		}
+	}
+
+	return t
+}
+
 // isInterval returns true if the schedule's second, minute or hour field starts with
 // a star (eg: "*" or "*/5"), these schedules follow the elapsed time across DST transitions.
 func (s *SpecSchedule) isInterval() bool {

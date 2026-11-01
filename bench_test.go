@@ -126,3 +126,17 @@ func BenchmarkSpecNextDST(b *testing.B) {
 		})
 	}
 }
+
+func BenchmarkSpecPrev(b *testing.B) {
+	for _, spec := range []string{"0 6 1 * MON", "TZ=America/New_York 0 6 1 * MON", "TZ=America/New_York */5 * * * *"} {
+		b.Run(spec, func(b *testing.B) {
+			sched, _ := ParseStandard(spec)
+			s := sched.(*SpecSchedule)
+			t := time.Date(2030, 1, 1, 0, 0, 0, 0, time.UTC)
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				t = s.Prev(t)
+			}
+		})
+	}
+}
