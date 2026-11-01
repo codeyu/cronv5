@@ -19,6 +19,8 @@ type JobRun struct {
 	RunID       RunID      // Unique identifier for this job run
 	Entry       Entry      // Job definition being executed
 	CreatedAt   time.Time  // When the run was created
+	ScheduledAt time.Time  // Activation time the run is for (the time Trigger was called for a triggered run)
+	Triggered   bool       // The run was started by Trigger (or RunNow), not by the schedule
 	StartedAt   *time.Time // When execution began (nil if not started)
 	CompletedAt *time.Time // When execution finished (nil if not completed)
 	Events      []JobEvent // Timeline of events during execution
@@ -34,16 +36,18 @@ func (j JobRun) Logger() Logger {
 }
 
 type jobRunStruct struct {
-	runID     RunID
-	entry     Entry
-	clock     clockwork.Clock
-	inner     mtx.RWMtx[jobRunInner]
-	createdAt time.Time
-	cronCtx   context.Context // Context of the cron when the run was created
-	ctx       context.Context // Context of the run, cancelled when the job completes
-	cancel    context.CancelFunc
-	logsBuf   *syncBuffer
-	logger    Logger
+	runID       RunID
+	entry       Entry
+	clock       clockwork.Clock
+	inner       mtx.RWMtx[jobRunInner]
+	createdAt   time.Time
+	scheduledAt time.Time
+	triggered   bool
+	cronCtx     context.Context // Context of the cron when the run was created
+	ctx         context.Context // Context of the run, cancelled when the job completes
+	cancel      context.CancelFunc
+	logsBuf     *syncBuffer
+	logger      Logger
 }
 
 // syncBuffer is a bytes.Buffer safe for concurrent use,
@@ -121,8 +125,10 @@ func (j *jobRunStruct) export() JobRun {
 	})
 	return JobRun{
 		RunID:       j.runID,
-		Entry:       j.entry,
+		Entry:       j.entry.snapshot(),
 		CreatedAt:   j.createdAt,
+		ScheduledAt: j.scheduledAt,
+		Triggered:   j.triggered,
 		Logs:        j.logsBuf.String(),
 		logger:      j.logger,
 		Events:      innerCopy.events,

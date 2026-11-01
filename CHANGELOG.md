@@ -16,6 +16,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   They can be listed with other items, eg: `0 0 1,15,L * *`. Specs using them were rejected before.
 - **Day of week `7` is Sunday**, as in Vixie cron (`5-7` is Friday to Sunday).
+- **Metrics**: `Builder.WithMetrics(m)` with the `Metrics` interface (`JobStarted` with the delay since
+  the scheduled time, `JobCompleted` with the duration, `JobSkipped`), and `BaseMetrics` to embed.
+  `JobRun.ScheduledAt` is the activation time a run is for, `JobRun.Triggered` tells if it was started
+  by `Trigger` / `RunNow`.
 - **Entry tags**: `WithTags(tags...)` entry option and `Entry.Tags` / `Entry.HasTag`, with
   `EntriesByTag`, `RemoveByTag`, `EnableByTag`, `DisableByTag` and `SetTags`.
 - **One-time jobs**: `Cron.AddJobAt(t, job)` runs a job once at the given time, then removes its entry.

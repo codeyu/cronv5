@@ -48,6 +48,7 @@ type Cron struct {
 	maxCompletedRuns     int                                          // Maximum number of completed job runs kept per entry (0 = unlimited)
 	maxLogSize           int                                          // Maximum size in bytes of the logs kept per job run (0 = unlimited)
 	keepJobsOnStop       bool                                         // Stop does not cancel the context of the running jobs
+	metrics              Metrics                                      // Receives the measurements of the job runs (nil = none)
 	cleanupNowCh         chan struct{}                                // Channel to trigger immediate cleanup of completed job runs
 	lastCleanupTS        mtx.Mtx[time.Time]                           // Timestamp of last completed job runs cleanup (thread-safe)
 	hooks                mtx.RWMtx[hooksContainer]                    // Thread-safe container for managing job hooks (both global and entry-specific)
@@ -249,6 +250,7 @@ type Builder struct {
 	maxCompletedRuns     int
 	maxLogSize           int
 	keepJobsOnStop       bool
+	metrics              Metrics
 	logger               Logger
 	ctx                  context.Context
 }
@@ -363,6 +365,7 @@ func (b *Builder) Build() *Cron {
 		maxCompletedRuns:     b.maxCompletedRuns,
 		maxLogSize:           b.maxLogSize,
 		keepJobsOnStop:       b.keepJobsOnStop,
+		metrics:              b.metrics,
 		cleanupNowCh:         make(chan struct{}, 1),
 		hooks: mtx.NewRWMtx(hooksContainer{
 			hooksMap:       make(map[HookID]hookMeta),
@@ -1069,6 +1072,7 @@ func (c *Cron) trigger(id EntryID) (RunID, error) {
 	}
 	// Create the job run without holding the lock, the factories are user code
 	jobRun := newJobRun(c.lifecycle.Load().jobsCtx, c.clock, snapshot, c.idFactory, c.jobRunLoggerFactory, c.maxLogSize)
+	jobRun.scheduledAt, jobRun.triggered = snapshot.Prev, true
 	err := ErrEntryNotFound
 	// Start the run while holding the read lock, so it cannot race with removeEntry
 	c.entries.RWith(func(entries entries) {
@@ -1213,6 +1217,7 @@ func (c *Cron) runDueEntries() {
 	runs := make([]*jobRunStruct, len(due))
 	for i, d := range due {
 		runs[i] = newJobRun(jobsCtx, c.clock, d.snapshot, c.idFactory, c.jobRunLoggerFactory, c.maxLogSize)
+		runs[i].scheduledAt = d.snapshot.Prev
 	}
 	// Start the runs while holding the read lock, so they cannot race with removeEntry
 	c.entries.RWith(func(entries entries) {
@@ -1467,11 +1472,14 @@ func (c *Cron) runWithRecovery(jobRun *jobRunStruct) {
 			logger.Error("job panic", "label", label, "entryID", entryID, "runID", runID, "error", r, "stack", string(debug.Stack()))
 			makeEvent(c, jobRun, JobPanic)
 		}
-		logger.Info("job completed", "label", label, "entryID", entryID, "runID", runID, "duration", clock.Since(start))
+		duration := clock.Since(start)
+		logger.Info("job completed", "label", label, "entryID", entryID, "runID", runID, "duration", duration)
 		makeEvent(c, jobRun, JobCompleted)
+		c.withMetrics(func(m Metrics) { m.JobCompleted(jobRun.export(), duration) })
 	}()
 	logger.Info("job start", "label", label, "entryID", entryID, "runID", runID)
 	makeEvent(c, jobRun, JobStart)
+	c.withMetrics(func(m Metrics) { m.JobStarted(jobRun.export(), start.Sub(jobRun.scheduledAt)) })
 	if err := entry.job.Run(jobRun.ctx, c, jobRun.export()); err != nil {
 		logger.Error("job error", "label", label, "entryID", entryID, "runID", runID, "error", err)
 		makeEventErr(c, jobRun, JobErr, err)

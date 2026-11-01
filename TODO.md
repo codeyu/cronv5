@@ -131,7 +131,7 @@
 | 7 | **F14 `WithRetry` 指数退避 + 抖动 + 自定义重试判断** — rc#560 | [ ] |
 | 8 | **F15 并发限制**（全局 / 按标签），`SkipIfStillRunning` 可作为 EntryOption — rc#430、rc#285 | [ ] |
 | 9 | **F17 Entry tags**：`WithTags`、`EntriesByTag` / `RemoveByTag` / `EnableByTag` / `DisableByTag` / `SetTags` — rc#307 | [x] |
-| 10 | **F20 Metrics 钩子 + `JobRun.ScheduledAt`** — rc#357 | [ ] |
+| 10 | **F20 `Metrics` 接口（`WithMetrics`：开始/延迟、完成/耗时、跳过）+ `JobRun.ScheduledAt` / `Triggered`** — rc#357 | [x] |
 
 顺手完成的小项：
 - [ ] **F12** `@every` 立即执行 / 首次延迟：已有 `RunOnStart`、`WithNext`，补文档 — rc#406、rc#258、rc#297
