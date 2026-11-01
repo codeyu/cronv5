@@ -50,6 +50,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Ranges wrapping around** in the month and day of week fields: `FRI-MON`, `NOV-FEB`, `FRI-TUE/2`.
   They were rejected before ("beginning of range beyond end of range").
 
+### Fixed
+
+- **`JobRunCreatedCh` / `JobRunCompletedCh` dropped most job runs**: the channels were unbuffered and sent
+  to without blocking, so a job run was only delivered if a receiver was waiting at that exact moment.
+  They are now buffered (`JobRunEventsBuffer`, 100 job runs), job runs are dropped only when the buffer is
+  full, and the jobs are still never blocked by a slow receiver. The channels are created by the first call
+  of these methods: job runs are only sent (and exported) once a channel was requested.
+
 ### Changed
 
 - **Daylight saving time transitions are handled like Vixie cron (the Linux crontab).** Schedules

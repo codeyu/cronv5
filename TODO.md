@@ -152,7 +152,7 @@
 
 ## P4 — v1.0 之后：长期维护
 
-- [ ] `TestJobRunEvents` 偶发失败（v0.2.0 起就存在）：`JobRunCreatedCh` / `JobRunCompletedCh` 是无缓冲 channel + 非阻塞发送，事件大多被丢弃。
+- [x] `TestJobRunEvents` 偶发失败（v0.2.0 起就存在）：`JobRunCreatedCh` / `JobRunCompletedCh` 是无缓冲 channel + 非阻塞发送，事件大多被丢弃。改为首次调用时创建、带缓冲（100）的 channel，满了才丢弃；测试改为确定性断言。
 
 - bug 修复与性能优化为主，严格遵循语义化版本。
 - **时区数据**：各国夏令时政策会变，`doc.go` 已说明可 `import _ "time/tzdata"` 内嵌时区数据；DST 回归测试（`spec_dst_test.go`）已内嵌 tzdata。

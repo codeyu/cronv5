@@ -42,8 +42,8 @@ type Cron struct {
 	idFactory            IDFactory                                    // Generates a new unique ID for Entry/JobRun/Hook
 	jobRunLoggerFactory  JobRunLoggerFactory                          // Factory for creating loggers for individual job runs
 	ps                   *pubsub.PubSub[EntryID, JobEvent]            // PubSub for publishing and subscribing to job events
-	jobRunCreatedCh      chan JobRun                                  // Channel for receiving notifications when new job runs are created
-	jobRunCompletedCh    chan JobRun                                  // Channel for receiving notifications when job runs complete
+	jobRunCreatedCh      jobRunEvents                                 // Notifications when new job runs are created (see JobRunCreatedCh)
+	jobRunCompletedCh    jobRunEvents                                 // Notifications when job runs complete (see JobRunCompletedCh)
 	keepCompletedRunsDur mtx.Mtx[time.Duration]                       // Duration to keep completed job runs before cleanup (thread-safe)
 	maxCompletedRuns     int                                          // Maximum number of completed job runs kept per entry (0 = unlimited)
 	maxLogSize           int                                          // Maximum size in bytes of the logs kept per job run (0 = unlimited)
@@ -366,8 +366,6 @@ func (b *Builder) Build() *Cron {
 		idFactory:            idFactory,
 		jobRunLoggerFactory:  jobRunLoggerFactory,
 		ps:                   pubsub.NewPubSub[EntryID, JobEvent](),
-		jobRunCreatedCh:      make(chan JobRun),
-		jobRunCompletedCh:    make(chan JobRun),
 		keepCompletedRunsDur: mtx.NewMtx(keepCompletedRunsDur),
 		maxCompletedRuns:     b.maxCompletedRuns,
 		maxLogSize:           b.maxLogSize,
@@ -513,11 +511,18 @@ func (c *Cron) Sub(id EntryID) *pubsub.Sub[EntryID, JobEvent] {
 	return c.ps.Subscribe([]EntryID{id})
 }
 
-// JobRunCreatedCh returns channel for job run creation notifications
-func (c *Cron) JobRunCreatedCh() <-chan JobRun { return c.jobRunCreatedCh }
+// JobRunCreatedCh returns a channel receiving the job runs when they are created (before they start).
+//
+// The channel is created by the first call, the job runs created from then on are sent to it.
+// It is buffered (JobRunEventsBuffer job runs): when it is full, because nobody receives from it or
+// not fast enough, the new job runs are dropped, so that the jobs are never blocked by a slow receiver.
+// All the calls return the same channel: with several receivers, each job run is received by one of
+// them. To be notified of every job run, use hooks instead (OnJobStart, OnEvt...).
+func (c *Cron) JobRunCreatedCh() <-chan JobRun { return c.jobRunCreatedCh.channel() }
 
-// JobRunCompletedCh returns channel for job run completion notifications
-func (c *Cron) JobRunCompletedCh() <-chan JobRun { return c.jobRunCompletedCh }
+// JobRunCompletedCh returns a channel receiving the job runs when they complete,
+// with the same behavior as JobRunCreatedCh (to be notified of every job run, use OnJobCompleted).
+func (c *Cron) JobRunCompletedCh() <-chan JobRun { return c.jobRunCompletedCh.channel() }
 
 // Enable activates a previously disabled cron entry by its ID
 func (c *Cron) Enable(id EntryID) { c.setEntryActive(id, true) }
@@ -1463,7 +1468,7 @@ func (c *Cron) registerJobRun(entryID EntryID, jobRun *jobRunStruct) {
 
 // completeJobRun moves the job run from the running jobs to the completed jobs of the entry.
 func (c *Cron) completeJobRun(entryID EntryID, jobRun *jobRunStruct) {
-	utils.NonBlockingSend(c.jobRunCompletedCh, jobRun.export())
+	c.jobRunCompletedCh.send(c, jobRun)
 	jobRuns, ok := c.runningJobsMap.Load(entryID)
 	if !ok { // Entry was removed while the job was running
 		return
@@ -1512,7 +1517,7 @@ func (c *Cron) startJob(jobRun *jobRunStruct) {
 			c.runningJobsCount.Add(-1)
 			c.signalJobCompleted()
 		}()
-		utils.NonBlockingSend(c.jobRunCreatedCh, jobRun.export())
+		c.jobRunCreatedCh.send(c, jobRun)
 		release, err := c.limits.acquire(jobRun.ctx, jobRun.entry.Tags)
 		if err != nil { // Cancelled while waiting for a concurrency limit
 			c.cancelledBeforeStart(jobRun, err)

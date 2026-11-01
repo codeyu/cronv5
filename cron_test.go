@@ -1507,34 +1507,27 @@ func TestCancelRun(t *testing.T) {
 func TestJobRunEvents(t *testing.T) {
 	clock := clockwork.NewFakeClockAt(time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC))
 	cron := New().WithClock(clock).WithParser(secondParser).WithKeepCompletedRunsDur(0).WithLogger(newErrLogger()).Build()
-	_, _ = cron.AddJob("* * * * * *", func() {})
-	cron.Start()
-	defer cron.Stop()
 	createdCh := cron.JobRunCreatedCh()
 	completedCh := cron.JobRunCompletedCh()
-	// Events are sent without blocking, they are dropped if nobody is receiving at that moment,
-	// so keep running the job until both events have been received.
-	var gotCreated, gotCompleted bool
-	for i := 0; i < 1000 && !(gotCreated && gotCompleted); i++ {
-		done := make(chan struct{})
-		go func() {
-			advanceAndCycle(cron, time.Second)
-			close(done)
-		}()
-	loop:
-		for {
-			select {
-			case <-createdCh:
-				gotCreated = true
-			case <-completedCh:
-				gotCompleted = true
-			case <-done:
-				break loop
-			}
+	id, _ := cron.AddJob("* * * * * *", func() {})
+	cron.Start()
+	defer cron.Stop()
+	advanceAndCycle(cron, time.Second)
+
+	recv := func(ch <-chan JobRun) JobRun {
+		select {
+		case run := <-ch:
+			return run
+		case <-time.After(time.Second):
+			t.Fatal("no job run received")
+			return JobRun{}
 		}
 	}
-	assert.True(t, gotCreated)
-	assert.True(t, gotCompleted)
+	created, completed := recv(createdCh), recv(completedCh)
+	assert.Equal(t, id, created.Entry.ID)
+	assert.Equal(t, created.RunID, completed.RunID)
+	assert.Nil(t, created.CompletedAt)
+	assert.NotNil(t, completed.CompletedAt)
 }
 
 func TestGetCleanupTS(t *testing.T) {
