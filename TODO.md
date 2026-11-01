@@ -116,37 +116,42 @@
 | CompletedJobs（1000 runs） | 2.5 ms / 2512 allocs | 2.1 ms / 1512 allocs | 1.2× |
 | Dispatch（一次触发 1000 个 job） | 8.6 ms / 34 allocs/job | 8.4 ms / 30 allocs/job | ≈1× |
 
-## P3 — 新功能（来自 robfig/cron 社区需求）
+## P3 — 新功能路线图（最多 10 项，做完发布 v1.0 并冻结 API）
 
-### 表达式 / 解析器
-- [ ] **F1 `L`（月最后一天）、`L-n`、`LW`、`W`（最近工作日）** — rc#397、rc#279、rc#105
-- [ ] **F2 `#`（第 n 个星期几，如 `MON#1`）与 `5L`（最后一个周五）** — rc#486、rc#518
-- [ ] **F3 Jenkins 风格 `H` 哈希值**（按 entry ID 打散，避免同一时刻雪崩）— rc#309
-- [ ] **F4 星期 `7` = 周日、环绕区间 `FRI-MON`** — 常见需求，Vixie cron 兼容
-- [ ] **F5 可选 Year 字段（Quartz 兼容）** — rc#340
-- [ ] **F6 `Schedule.Prev()` / 获取前 N 次、后 N 次执行时间** — rc#322、rc#361、rc#224
-- [ ] **F7 时区支持 UTC 偏移（`TZ=UTC+8`）** — rc#324、rc#379
-- [ ] **F8 DST 处理策略**：当前春季跳变时 `30 2 * * *` 整天被跳过（已验证 2024-03-10 纽约直接跳到 03-11），秋季回拨执行两次。提供可选策略（跳变时在下一个有效时刻执行 / 回拨只执行一次）— rc#541
-- [ ] **F9 亚秒级 `@every`**（可选开启）— rc#178
-- [ ] **F10 表达式转人类可读描述 `Describe(spec)`** — rc#229
+表达式目标：**兼容 Vixie cron（Linux crontab），并支持 Quartz 的 `L` / `W` / `#`**。不追求"全支持"所有方言：星期仍按 Vixie 编号（0/7 = 周日），不采用 Quartz 的 1 = 周日。
 
-### 调度 / 任务
-- [ ] **F11 指定时间点的一次性任务 `At(time.Time)` / `AddOnce`** — rc#441、rc#302
-- [ ] **F12 `@every` 立即执行 / 首次延迟**（已有 `RunOnStart`、`WithNext`，补充文档及 `WithFirstDelay`）— rc#406、rc#258、rc#297
-- [ ] **F13 错过执行的补偿策略（Misfire policy）**：系统休眠/阻塞后选择“跳过 / 补跑一次 / 全部补跑”。
-- [ ] **F14 `WithRetry` 支持指数退避 + 抖动 + 自定义重试判断** — rc#560
-- [ ] **F15 全局/按标签并发限制（`WithMaxConcurrency`）**、按 entry 的 `SkipIfStillRunning` 作为 EntryOption — rc#430、rc#285
-- [ ] **F16 `RunNow` 走完整 wrapper 链并返回 RunID**；`Entry.Job` 手动调用绕过 wrapper 的问题 — rc#551
-- [ ] **F17 Entry 支持 tag/metadata，按 tag 查询/删除/暂停** — rc#307 扩展
-- [ ] **F18 `Pause()/Resume()` 整个调度器（不取消运行中任务）**
-- [ ] **F19 可插拔持久化 / 分布式锁接口（Store / Locker）**，用于多实例部署只执行一次和保存执行历史 — rc#214、rc#428
-- [ ] **F20 Metrics 钩子（Prometheus 友好的计数/耗时）**，JobRun 增加 `ScheduledAt`（本次计划时间）— rc#357
+| # | 项 | 状态 |
+|---|---|---|
+| 1 | **F1 + F2 + F4 表达式扩展**：`L`、`L-n`、`LW`、`nW`；`MON#2`、`5L`；星期 `7` = 周日、环绕区间 `FRI-MON` / `NOV-FEB` — rc#397、rc#279、rc#105、rc#486、rc#518 | [x] |
+| 2 | **F8 DST 处理策略**（按正确性问题处理）：春季跳变时 `30 2 * * *` 整天被跳过，秋季回拨执行两次。跳变时在下一个有效时刻执行、回拨只执行一次 — rc#541 | [ ] |
+| 3 | **F6 `Prev()` / 后 N 次执行时间**（可考虑 `iter.Seq`）— rc#322、rc#361、rc#224 | [ ] |
+| 4 | **F16 `RunNow` 走完整 wrapper 链并返回 RunID**（本质是 bug）— rc#551 | [ ] |
+| 5 | **F11 指定时间点的一次性任务 `At(time.Time)`** — rc#441、rc#302 | [ ] |
+| 6 | **F13 错过执行的补偿策略**：休眠/阻塞后"跳过 / 补跑一次 / 全部补跑" | [ ] |
+| 7 | **F14 `WithRetry` 指数退避 + 抖动 + 自定义重试判断** — rc#560 | [ ] |
+| 8 | **F15 并发限制**（全局 / 按标签），`SkipIfStillRunning` 可作为 EntryOption — rc#430、rc#285 | [ ] |
+| 9 | **F17 Entry tag/metadata**，按 tag 查询 / 删除 / 暂停 — rc#307 | [ ] |
+| 10 | **F20 Metrics 钩子 + `JobRun.ScheduledAt`** — rc#357 | [ ] |
 
----
+顺手完成的小项：
+- [ ] **F12** `@every` 立即执行 / 首次延迟：已有 `RunOnStart`、`WithNext`，补文档 — rc#406、rc#258、rc#297
+- [ ] **F7** `TZ=UTC+8` 这类 UTC 偏移（`time.FixedZone`）— rc#324、rc#379
 
-## 建议执行顺序
+暂不做（有明确需求再说）：
+- **F3** Jenkins 风格 `H` 哈希 — rc#309
+- **F5** 可选 Year 字段 — rc#340
+- **F18** 整个调度器 `Pause()/Resume()`（F17 按 tag 暂停可覆盖大部分场景）
 
-1. P0 全部（每项附回归测试，`go test -race` 通过）
-2. R1–R11
-3. P1–P9（先加 benchmark 再优化）
-4. F 系列按需挑选（推荐优先：F1/F2/F4、F11、F13、F14、F6）
+不做：
+- **F9** 亚秒级 `@every`：太小众，用 ticker 即可 — rc#178
+- **F10** `Describe(spec)` 人类可读描述：涉及多语言，适合独立包 — rc#229
+- **F19** 持久化 / 分布式锁：范围太大且绑定存储；最多只定义 `Locker` 接口，由用户实现 — rc#214、rc#428
+- **webadmin**：已移除，安全维护（XSS / CSRF / 认证）不属于调度库的职责
+
+## P4 — v1.0 之后：长期维护
+
+- bug 修复与性能优化为主，严格遵循语义化版本。
+- **时区数据**：各国夏令时政策会变，文档说明可 `import _ "time/tzdata"` 内嵌时区数据；保留 DST 回归测试。
+- **跟进 Go 新版本**：用 `testing/synctest` 替换 clockwork 依赖（Go 1.25+）。
+- **解析器 fuzz 测试**长期运行。
+- **从 robfig/cron 迁移指南**：列出行为差异。
