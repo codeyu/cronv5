@@ -12,6 +12,10 @@ type SpecSchedule struct {
 
 	// Day rules that cannot be represented as bit sets ("L", "W", "#").
 	days dayRules
+
+	// intervalTime is true if the second, minute or hour field starts with a star
+	// (eg: "*/5", that does not set the starBit). See isInterval.
+	intervalTime bool
 }
 
 // dayRules holds the day-of-month and day-of-week items that depend on the month
@@ -77,7 +81,136 @@ const (
 
 // Next returns the next time this schedule is activated, greater than the given
 // time.  If no time can be found to satisfy the schedule, return the zero time.
+//
+// Daylight saving time transitions are handled as Vixie cron does (see "Daylight
+// saving time" in the package documentation):
+//   - a time that does not exist (the clock jumps forward) activates at the end of
+//     the jump, unless the schedule is an interval (its second, minute or hour field
+//     starts with '*'): the time is then skipped;
+//   - a time that occurs twice (the clock goes back) activates only the first time,
+//     unless the schedule is an interval: it then activates both times.
 func (s *SpecSchedule) Next(t time.Time) time.Time {
+	// Schedules without a time zone specified (time.Local) are treated as local to
+	// the time provided. The result is returned in the location of the given time.
+	origLocation := t.Location()
+	loc := s.Location
+	if loc == time.Local {
+		loc = t.Location()
+	}
+	t = t.In(loc)
+	interval := s.isInterval()
+
+	// The search is done on wall clock times, using UTC as a calendar without DST:
+	// each matching wall clock time is then converted to the instants it designates in loc.
+	wall := asWall(t)
+	yearLimit := wall.Year() + 5
+	next := s.search(t, wall, loc, interval, yearLimit)
+	if interval {
+		// If t is during the first occurrence of times that will be repeated (the clock goes back
+		// next), the second occurrence of times before t's wall clock time may come first.
+		if repeatedFrom, ok := repeatedWall(t); ok {
+			if other := s.search(t, repeatedFrom, loc, interval, yearLimit); !other.IsZero() && (next.IsZero() || other.Before(next)) {
+				next = other
+			}
+		}
+	}
+	if next.IsZero() {
+		return next
+	}
+	return next.In(origLocation)
+}
+
+// search returns the first activation after t, looking at the wall clock times after the given one.
+func (s *SpecSchedule) search(t, wall time.Time, loc *time.Location, interval bool, yearLimit int) time.Time {
+	for {
+		wall = s.nextWall(wall, yearLimit)
+		if wall.IsZero() {
+			return time.Time{}
+		}
+		first, second, exists := instantsOf(wall, loc)
+		switch {
+		case !exists:
+			if interval {
+				// Skip the times that do not exist: resume the search at the end of the jump.
+				wall = asWall(first).Add(-time.Second)
+				continue
+			}
+			// Runs at the end of the jump (first).
+		case first.After(t):
+		case interval && second.After(t):
+			first = second
+		default:
+			continue
+		}
+		if first.After(t) {
+			return first
+		}
+	}
+}
+
+// isInterval returns true if the schedule's second, minute or hour field starts with
+// a star (eg: "*" or "*/5"), these schedules follow the elapsed time across DST transitions.
+func (s *SpecSchedule) isInterval() bool {
+	return s.intervalTime || (s.Second|s.Minute|s.Hour)&starBit != 0
+}
+
+// asWall returns the wall clock time of t, as a time in UTC.
+func asWall(t time.Time) time.Time {
+	_, offset := t.Zone()
+	return time.Unix(t.Unix()+int64(offset), 0).UTC()
+}
+
+// repeatedWall returns, if t is during the first occurrence of times that will be repeated
+// (the clock goes back next), the wall clock time just before the repeated times.
+func repeatedWall(t time.Time) (time.Time, bool) {
+	_, end := t.ZoneBounds()
+	if end.IsZero() {
+		return time.Time{}, false
+	}
+	_, offset := t.Zone()
+	_, nextOffset := end.Zone()
+	if back := time.Duration(offset-nextOffset) * time.Second; back > 0 && !t.Before(end.Add(-back)) {
+		return asWall(end).Add(-time.Second), true
+	}
+	return time.Time{}, false
+}
+
+// instantsOf returns the instants at which the clock of loc shows the given wall clock time.
+//
+// If it occurs once, first is that instant and second is the zero time. If it occurs twice
+// (the clock goes back), first and second are both instants. If it does not exist (the clock
+// jumps forward), exists is false and first is the end of the jump.
+func instantsOf(wall time.Time, loc *time.Location) (first, second time.Time, exists bool) {
+	t := time.Date(wall.Year(), wall.Month(), wall.Day(), wall.Hour(), wall.Minute(), wall.Second(), 0, loc)
+	start, end := t.ZoneBounds()
+	if w := asWall(t); !w.Equal(wall) {
+		// Normalized by time.Date: t is just before or after the jump.
+		if w.After(wall) {
+			return start, time.Time{}, false
+		}
+		return end, time.Time{}, false
+	}
+	_, offset := t.Zone()
+	if !start.IsZero() {
+		// Also shown by the clock before t's zone started?
+		_, prevOffset := start.Add(-time.Second).Zone()
+		if other := t.Add(time.Duration(offset-prevOffset) * time.Second); other.Before(start) {
+			return other, t, true
+		}
+	}
+	if !end.IsZero() {
+		// Also shown by the clock after t's zone ended?
+		_, nextOffset := end.Zone()
+		if other := t.Add(time.Duration(offset-nextOffset) * time.Second); !other.Before(end) {
+			return t, other, true
+		}
+	}
+	return t, time.Time{}, true
+}
+
+// nextWall returns the first wall clock time after the given one (both as times in UTC)
+// matching the schedule, or the zero time if there is none until yearLimit.
+func (s *SpecSchedule) nextWall(t time.Time, yearLimit int) time.Time {
 	// General approach
 	//
 	// For Month, Day, Hour, Minute, Second:
@@ -87,27 +220,11 @@ func (s *SpecSchedule) Next(t time.Time) time.Time {
 	// of the field list (since it is necessary to re-verify previous field
 	// values)
 
-	// Convert the given time into the schedule's timezone, if one is specified.
-	// Save the original timezone so we can convert back after we find a time.
-	// Note that schedules without a time zone specified (time.Local) are treated
-	// as local to the time provided.
-	origLocation := t.Location()
-	loc := s.Location
-	if loc == time.Local {
-		loc = t.Location()
-	}
-	if s.Location != time.Local {
-		t = t.In(s.Location)
-	}
-
 	// Start at the earliest possible time (the upcoming second).
 	t = t.Add(1*time.Second - time.Duration(t.Nanosecond())*time.Nanosecond)
 
 	// This flag indicates whether a field has been incremented.
 	added := false
-
-	// If no time is found within five years, return zero.
-	yearLimit := t.Year() + 5
 
 WRAP:
 	if t.Year() > yearLimit {
@@ -121,7 +238,7 @@ WRAP:
 		if !added {
 			added = true
 			// Otherwise, set the date at the beginning (since the current time is irrelevant).
-			t = time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, loc)
+			t = time.Date(t.Year(), t.Month(), 1, 0, 0, 0, 0, time.UTC)
 		}
 		t = t.AddDate(0, 1, 0)
 
@@ -132,26 +249,12 @@ WRAP:
 	}
 
 	// Now get a day in that month.
-	//
-	// NOTE: This causes issues for daylight savings regimes where midnight does
-	// not exist.  For example: Sao Paulo has DST that transforms midnight on
-	// 11/3 into 1am. Handle that by noticing when the Hour ends up != 0.
 	for !dayMatches(s, t) {
 		if !added {
 			added = true
-			t = time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, loc)
+			t = time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, time.UTC)
 		}
 		t = t.AddDate(0, 0, 1)
-		// Notice if the hour is no longer midnight due to DST.
-		// Add an hour if it's 23, subtract an hour if it's 1.
-		if t.Hour() != 0 {
-			if t.Hour() > 12 {
-				t = t.Add(time.Duration(24-t.Hour()) * time.Hour)
-			} else {
-				t = t.Add(time.Duration(-t.Hour()) * time.Hour)
-			}
-		}
-
 		if t.Day() == 1 {
 			goto WRAP
 		}
@@ -160,7 +263,7 @@ WRAP:
 	for 1<<uint(t.Hour())&s.Hour == 0 {
 		if !added {
 			added = true
-			t = time.Date(t.Year(), t.Month(), t.Day(), t.Hour(), 0, 0, 0, loc)
+			t = t.Truncate(time.Hour)
 		}
 		t = t.Add(1 * time.Hour)
 
@@ -193,7 +296,7 @@ WRAP:
 		}
 	}
 
-	return t.In(origLocation)
+	return t
 }
 
 // dayMatches returns true if the schedule's day-of-week and day-of-month

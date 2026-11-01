@@ -113,3 +113,16 @@ func BenchmarkCleanupOldRuns(b *testing.B) {
 		cron.cleanupOldRuns(cron.ctx(), time.Hour) // Nothing to clean, measures the traversal
 	}
 }
+
+func BenchmarkSpecNextDST(b *testing.B) {
+	for _, spec := range []string{"TZ=America/New_York 0 6 1 * MON", "TZ=America/New_York */5 * * * *", "TZ=UTC */5 * * * *"} {
+		b.Run(spec, func(b *testing.B) {
+			sched, _ := ParseStandard(spec)
+			t := time.Date(2000, 1, 1, 0, 0, 0, 0, time.UTC)
+			b.ReportAllocs()
+			for i := 0; i < b.N; i++ {
+				t = sched.Next(t)
+			}
+		})
+	}
+}

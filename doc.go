@@ -168,8 +168,27 @@ or at runtime with SetLocation.
 A spec can also be prefixed with "CRON_TZ=<zone>" (or "TZ=<zone>") to use a specific time zone,
 for example "CRON_TZ=Asia/Tokyo 0 6 * * *".
 
-Be aware that jobs scheduled during daylight-savings leap-ahead transitions will
-not be run, and jobs scheduled during leap-behind transitions will run twice!
+The tz database of the machine is used (see time.LoadLocation). To embed it in the program
+instead, import the time/tzdata package:
+
+	import _ "time/tzdata"
+
+# Daylight saving time
+
+Daylight saving time transitions are handled as Vixie cron (the Linux crontab) does. Schedules
+whose second, minute or hour field starts with '*' (eg: "*\/5 * * * *", "0 * * * *") are
+interval schedules, the other ones (eg: "30 2 * * *", "0 9 * * MON") run at a fixed time.
+
+When the clock jumps forward (eg: from 2:00 to 3:00):
+  - a fixed time schedule whose time is skipped runs once at the end of the jump (3:00);
+  - an interval schedule skips the times that do not exist.
+
+When the clock goes back (eg: from 2:00 to 1:00, 1:00-2:00 occurs twice):
+  - a fixed time schedule whose time is repeated runs only the first time;
+  - an interval schedule runs both times.
+
+So "30 2 * * *" runs every day, once, and "0 * * * *" runs every hour of elapsed time.
+Time zones without daylight saving time (eg: UTC, Asia/Tokyo) are not affected.
 
 # Thread safety
 

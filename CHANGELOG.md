@@ -21,7 +21,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `SpecSchedule` has a new unexported field. Code building a `SpecSchedule` with an unkeyed
+- **Daylight saving time transitions are handled like Vixie cron (the Linux crontab).** Schedules
+  running at a fixed time (`30 2 * * *`) used to be skipped on the day the clock jumps forward
+  over their time, and to run twice when the clock goes back over it: they now run once, at the
+  end of the jump, and only the first time. Interval schedules (second, minute or hour field
+  starting with `*`, eg: `*/5 * * * *`, `0 * * * *`) are unchanged: they follow the elapsed time.
+  Specs whose times never exist (eg: `* 2 * 3 SUN#2` in New York) are rejected with
+  `ErrUnsatisfiableSchedule`.
+- `SpecSchedule.Next` is about 10 times faster in time zones other than UTC.
+- `SpecSchedule` has new unexported fields. Code building a `SpecSchedule` with an unkeyed
   struct literal (`SpecSchedule{1, 1, ...}`) must use field names (`SpecSchedule{Second: 1, ...}`).
 
 ### Removed

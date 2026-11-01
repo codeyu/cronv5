@@ -127,6 +127,12 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 	}
 
 	sched := &SpecSchedule{Location: loc}
+	for _, f := range fields[:3] {
+		// Like Vixie cron, a time field starting with a star makes an interval schedule ("*/5", "*").
+		if strings.HasPrefix(f, "*") || strings.HasPrefix(f, "?") {
+			sched.intervalTime = true
+		}
+	}
 	field := func(field string, r bounds, special specialItemParser) uint64 {
 		if err != nil {
 			return 0
@@ -144,6 +150,9 @@ func (p Parser) Parse(spec string) (Schedule, error) {
 	sched.Dow = field(fields[5], dow, parseDowItem)
 	if err != nil {
 		return nil, err
+	}
+	if (sched.Second|sched.Minute|sched.Hour)&starBit != 0 {
+		sched.intervalTime = false // already known from the bits
 	}
 	return sched, nil
 }
