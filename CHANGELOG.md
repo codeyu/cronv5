@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   They can be listed with other items, eg: `0 0 1,15,L * *`. Specs using them were rejected before.
 - **Day of week `7` is Sunday**, as in Vixie cron (`5-7` is Friday to Sunday).
+- **`Cron.Trigger(id)`** runs the job of an entry now and returns the `RunID` of the run, to follow it
+  with `GetJobRun`, `CancelJobRun`... It does not change the entry's schedule, runs disabled entries
+  too, and returns the new `ErrCronNotRunning` when the cron is not running.
 - **Activation times**: `SpecSchedule.Prev` returns the last activation before a given time
   (the inverse of `Next`, DST transitions included), `NextN` and `Activations` (an `iter.Seq`)
   list the next activation times of any `Schedule`, and `Cron.NextActivations` lists the next
@@ -32,6 +35,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   starting with `*`, eg: `*/5 * * * *`, `0 * * * *`) are unchanged: they follow the elapsed time.
   Specs whose times never exist (eg: `* 2 * 3 SUN#2` in New York) are rejected with
   `ErrUnsatisfiableSchedule`.
+- **`RunNow` no longer changes the schedule of the entry** while the cron is running: it used to
+  replace the next activation time and recompute it after the run (eg: resetting the phase of an
+  `@every 1h` entry, or dropping a time set with `WithNext`). It now starts an extra run, as `Trigger`
+  does, and also runs disabled entries. Called before `Start`, it still runs the job when the cron starts.
 - `SpecSchedule.Next` is about 10 times faster in time zones other than UTC.
 - `SpecSchedule` has new unexported fields. Code building a `SpecSchedule` with an unkeyed
   struct literal (`SpecSchedule{1, 1, ...}`) must use field names (`SpecSchedule{Second: 1, ...}`).

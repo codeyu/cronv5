@@ -125,7 +125,7 @@
 | 1 | **F1 + F2 + F4 表达式扩展**：`L`、`L-n`、`LW`、`nW`；`MON#2`、`5L`；星期 `7` = 周日、环绕区间 `FRI-MON` / `NOV-FEB` — rc#397、rc#279、rc#105、rc#486、rc#518 | [x] |
 | 2 | **F8 DST 处理**（按正确性问题处理）：采用 Vixie cron 规则——固定时刻任务在春季跳变时于跳变结束时执行一次、秋季回拨只执行第一次；间隔型任务（秒/分/时字段以 `*` 开头）跟随真实时间 — rc#541 | [x] |
 | 3 | **F6 `SpecSchedule.Prev()`、`NextN` / `Activations`（`iter.Seq`）、`Cron.NextActivations`** — rc#322、rc#361、rc#224 | [x] |
-| 4 | **F16 `RunNow` 走完整 wrapper 链并返回 RunID**（本质是 bug）— rc#551 | [ ] |
+| 4 | **F16 `Trigger(id) (RunID, error)`**：wrapper 本来就会生效（wrapper 包在 job 里），实际问题是 `RunNow` 不返回 RunID、会改写 `Next`（`@every` 相位被重置）、对禁用的 entry 静默不执行；`Entry.Job()` 补充文档 — rc#551 | [x] |
 | 5 | **F11 指定时间点的一次性任务 `At(time.Time)`** — rc#441、rc#302 | [ ] |
 | 6 | **F13 错过执行的补偿策略**：休眠/阻塞后"跳过 / 补跑一次 / 全部补跑" | [ ] |
 | 7 | **F14 `WithRetry` 指数退避 + 抖动 + 自定义重试判断** — rc#560 | [ ] |

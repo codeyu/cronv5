@@ -13,6 +13,7 @@ Cron specs support `L`, `L-n`, `LW`, `15W` (day of month), `MON#2`, `5L` (day of
 List the next activation times with `cron.NextN(schedule, t, n)` / `c.NextActivations(id, n)`, and the previous one with `SpecSchedule.Prev`  
 Do not sort all entries at every iteration  
 Use Heap data structure to store entries  
+Can run a job now with `runID, err := c.Trigger(entryID)`, without changing its schedule  
 Can ask the cron object if a job is currently running with `isRunning := c.IsRunning(entryID)`  
 Tests runs in under a second (instead of over a minute)  
 

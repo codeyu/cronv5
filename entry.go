@@ -32,7 +32,11 @@ type jobUnwrapper interface {
 	unwrapJob() any
 }
 
-// Job returns the original job as it was before it was wrapped by the cron library
+// Job returns the job given to AddJob (for a function, the function itself, before it
+// was adapted to the Job interface).
+//
+// Calling it directly bypasses the cron: no job run (RunID, logger), hooks, events nor panic
+// recovery. Use Cron.Trigger (or RunNow) to run the job now as the cron does.
 func (e Entry) Job() any {
 	if w, ok := e.job.(jobUnwrapper); ok {
 		return w.unwrapJob()

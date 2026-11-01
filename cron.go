@@ -161,6 +161,9 @@ var ErrJobAlreadyRunning = errors.New("job already running")
 // ErrIDAlreadyUsed ...
 var ErrIDAlreadyUsed = errors.New("id already used")
 
+// ErrCronNotRunning is returned by Trigger when the cron is not running
+var ErrCronNotRunning = errors.New("cron is not running")
+
 // ErrUnsatisfiableSchedule is returned when a spec never activates (eg: "0 0 30 2 *", February 30th)
 var ErrUnsatisfiableSchedule = errors.New("schedule never activates")
 
@@ -519,8 +522,20 @@ func (c *Cron) Entry(id EntryID) (Entry, error) { return c.getEntry(id) }
 // Running jobs of the entry are cancelled, and the hooks specific to the entry are removed.
 func (c *Cron) Remove(id EntryID) { c.remove(id) }
 
-// RunNow allows the user to run a specific job now
+// RunNow runs the job of the entry now, as Trigger does, without returning the RunID.
+//
+// If the cron is not running, the job runs as soon as the cron is started
+// (unless the entry is disabled).
 func (c *Cron) RunNow(id EntryID) error { return c.runNow(id) }
+
+// Trigger runs the job of the entry now, in addition to its schedule: the next activation
+// time of the entry (Entry.Next) is not changed. The run is like a scheduled one: the job
+// wrappers, hooks, events and panic recovery apply, and the run can be followed with its
+// RunID (GetJobRun, CancelJobRun...). The run is started when Trigger returns.
+//
+// Disabled entries are run too. It returns ErrCronNotRunning if the cron is not running,
+// and ErrEntryNotFound if the entry does not exist.
+func (c *Cron) Trigger(id EntryID) (RunID, error) { return c.trigger(id) }
 
 // IsRunning either or not a specific job is currently running
 func (c *Cron) IsRunning(id EntryID) bool { return c.entryIsRunning(id) }
@@ -984,7 +999,47 @@ func (c *Cron) modifyEntry(id EntryID, updateFunc func(entry *Entry) bool) error
 }
 
 func (c *Cron) runNow(id EntryID) error {
+	if _, err := c.trigger(id); !errors.Is(err, ErrCronNotRunning) {
+		return err
+	}
+	// Not running: run as soon as the cron is started
 	return c.modifyEntry(id, nil)
+}
+
+func (c *Cron) trigger(id EntryID) (RunID, error) {
+	if !c.isRunning() {
+		return "", ErrCronNotRunning
+	}
+	var (
+		ptr      *Entry // To check that the entry was not removed/replaced in the meantime
+		snapshot Entry
+	)
+	if err := c.entries.WithE(func(entries *entries) error {
+		entry, ok := entries.entriesMap[id]
+		if !ok {
+			return ErrEntryNotFound
+		}
+		entry.Prev = c.now()
+		ptr, snapshot = entry, *entry
+		return nil
+	}); err != nil {
+		return "", err
+	}
+	// Create the job run without holding the lock, the factories are user code
+	jobRun := newJobRun(c.lifecycle.Load().jobsCtx, c.clock, snapshot, c.idFactory, c.jobRunLoggerFactory, c.maxLogSize)
+	err := ErrEntryNotFound
+	// Start the run while holding the read lock, so it cannot race with removeEntry
+	c.entries.RWith(func(entries entries) {
+		if entries.entriesMap[id] == ptr {
+			c.startJob(jobRun)
+			err = nil
+		}
+	})
+	if err != nil {
+		jobRun.cancel()
+		return "", err
+	}
+	return jobRun.runID, nil
 }
 
 func (c *Cron) setEntryActive(id EntryID, active bool) {
