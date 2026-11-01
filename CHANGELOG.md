@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   They can be listed with other items, eg: `0 0 1,15,L * *`. Specs using them were rejected before.
 - **Day of week `7` is Sunday**, as in Vixie cron (`5-7` is Friday to Sunday).
+- **UTC offsets as time zones**: `TZ=UTC+8`, `CRON_TZ=UTC+05:30`, `TZ=GMT-5`, `TZ=+0900`... The offset is
+  east of UTC (ISO 8601): `UTC+8` is 8 hours ahead of UTC, unlike the POSIX `TZ` variable and IANA's
+  `Etc/GMT+8`.
 - **Retries with exponential backoff**: `WithRetryPolicy(policy, job)` / `RetryPolicyWrapper(policy)` with
   `RetryPolicy` (`MaxRetries`, `InitialDelay`, `MaxDelay`, `Multiplier`, `Jitter`, `RetryIf`). The retries
   are logged in the logs of the job run.

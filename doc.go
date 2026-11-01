@@ -209,6 +209,13 @@ where "duration" is a string accepted by time.ParseDuration
 For example, "@every 1h30m10s" would indicate a schedule that activates after
 1 hour, 30 minutes, 10 seconds, and then every interval after that.
 
+The first activation is one interval after the entry is added (if that time went by before the cron
+is started, see "Missed activations"). To run the job right away, then at every interval, use the
+RunOnStart entry option. To choose the first activation, use WithNext:
+
+	c.AddJob("@every 1h", job, cron.RunOnStart)                              // now, then every hour
+	c.AddJob("@every 1h", job, cron.WithNext(time.Now().Add(10*time.Minute))) // in 10 minutes, then every hour
+
 Note: The interval does not take the job runtime into account. For example,
 if a job takes 3 minutes to run, and it is scheduled to run every 5 minutes,
 it will have only 2 minutes of idle time between each run.
@@ -220,7 +227,10 @@ By default, all interpretation and scheduling is done in the time zone of the cl
 or at runtime with SetLocation.
 
 A spec can also be prefixed with "CRON_TZ=<zone>" (or "TZ=<zone>") to use a specific time zone,
-for example "CRON_TZ=Asia/Tokyo 0 6 * * *".
+for example "CRON_TZ=Asia/Tokyo 0 6 * * *". The zone can also be a UTC offset, such as "UTC+8",
+"UTC+05:30", "GMT-5" or "+0900": the offset is east of UTC, "UTC+8" is 8 hours ahead of UTC (as in
+ISO 8601, unlike the POSIX TZ variable and the IANA "Etc/GMT+8" zone, which is 8 hours behind UTC).
+A UTC offset has no daylight saving time.
 
 The tz database of the machine is used (see time.LoadLocation). To embed it in the program
 instead, import the time/tzdata package:

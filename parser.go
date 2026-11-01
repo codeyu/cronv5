@@ -3,6 +3,7 @@ package cron
 import (
 	"fmt"
 	"math"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
@@ -165,12 +166,46 @@ func loadLocation(name string) (*time.Location, error) {
 	if loc, ok := locationCache.Load(name); ok {
 		return loc.(*time.Location), nil
 	}
-	loc, err := time.LoadLocation(name)
+	loc, isOffset, err := parseUTCOffset(name)
+	if !isOffset {
+		loc, err = time.LoadLocation(name)
+	}
 	if err != nil {
 		return nil, err
 	}
 	locationCache.Store(name, loc)
 	return loc, nil
+}
+
+// utcOffsetRe matches UTC offsets: "UTC+8", "UTC+5:30", "GMT-05:30", "+0800"
+// (without a colon, the minutes require two digits hours, "+123" is rejected)
+var utcOffsetRe = regexp.MustCompile(`^(?i:UTC|GMT)?([+-])(?:(\d{1,2})(?::(\d{2}))?|(\d{2})(\d{2}))$`)
+
+// parseUTCOffset returns a fixed time zone for a UTC offset such as "UTC+8", "UTC-05:30", "GMT+8"
+// or "+08:00". The offset is east of UTC ("UTC+8" is 8 hours ahead of UTC) as in ISO 8601, unlike the
+// POSIX TZ variable and the IANA "Etc/GMT+8" zone. isOffset is false if name is not a UTC offset.
+func parseUTCOffset(name string) (loc *time.Location, isOffset bool, err error) {
+	m := utcOffsetRe.FindStringSubmatch(name)
+	if m == nil {
+		return nil, false, nil
+	}
+	h, mm := m[2], m[3]
+	if m[4] != "" { // "+HHMM"
+		h, mm = m[4], m[5]
+	}
+	hours, _ := strconv.Atoi(h)
+	minutes := 0
+	if mm != "" {
+		minutes, _ = strconv.Atoi(mm)
+	}
+	if hours > 14 || minutes > 59 || (hours == 14 && minutes > 0) {
+		return nil, true, fmt.Errorf("UTC offset out of range (-14:00 to +14:00): %s", name)
+	}
+	offset := hours*3600 + minutes*60
+	if m[1] == "-" {
+		offset = -offset
+	}
+	return time.FixedZone(fmt.Sprintf("UTC%s%02d:%02d", m[1], hours, minutes), offset), true, nil
 }
 
 // normalizeFields takes a subset set of the time fields and returns the full set

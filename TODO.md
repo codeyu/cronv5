@@ -134,8 +134,8 @@
 | 10 | **F20 `Metrics` 接口（`WithMetrics`：开始/延迟、完成/耗时、跳过）+ `JobRun.ScheduledAt` / `Triggered`** — rc#357 | [x] |
 
 顺手完成的小项：
-- [ ] **F12** `@every` 立即执行 / 首次延迟：已有 `RunOnStart`、`WithNext`，补文档 — rc#406、rc#258、rc#297
-- [ ] **F7** `TZ=UTC+8` 这类 UTC 偏移（`time.FixedZone`）— rc#324、rc#379
+- [x] **F12** `@every` 立即执行 / 首次延迟：`doc.go` 补充 `RunOnStart`、`WithNext` 的用法，并加测试固定行为 — rc#406、rc#258、rc#297
+- [x] **F7** `TZ=UTC+8` / `UTC+05:30` / `GMT-5` / `+0900`（按 ISO 8601 东正西负，与 POSIX、`Etc/GMT+8` 相反）— rc#324、rc#379
 
 暂不做（有明确需求再说）：
 - **F3** Jenkins 风格 `H` 哈希 — rc#309
