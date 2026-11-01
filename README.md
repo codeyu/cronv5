@@ -23,6 +23,7 @@ Built in job wrapper:
 func Once(job IntoJob) Job
 func N(n int, j IntoJob) Job
 func WithRetry(maxRetry int, job IntoJob) Job
+func WithRetryPolicy(policy RetryPolicy, job IntoJob) Job // exponential backoff, jitter, RetryIf
 func WithTimeout(time.Duration, IntoJob) Job
 func WithDeadline(time.Time, IntoJob) Job
 func WithJitter(time.Duration, IntoJob) Job

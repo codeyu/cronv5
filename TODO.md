@@ -128,7 +128,7 @@
 | 4 | **F16 `Trigger(id) (RunID, error)`**：wrapper 本来就会生效（wrapper 包在 job 里），实际问题是 `RunNow` 不返回 RunID、会改写 `Next`（`@every` 相位被重置）、对禁用的 entry 静默不执行；`Entry.Job()` 补充文档 — rc#551 | [x] |
 | 5 | **F11 一次性任务 `AddJobAt(t, job)` / `At(t)` schedule**（过去的时间尽快执行，cron 未运行期间错过的在 Start 时执行）— rc#441、rc#302 | [x] |
 | 6 | **F13 Misfire 策略**：`MisfireSkip`（超过阈值才跳过，默认 1 分钟）/ `MisfireRunOnce` / `MisfireRunAll`，可按 cron 或 entry 设置；`MisfireDefault` 保持原行为 | [x] |
-| 7 | **F14 `WithRetry` 指数退避 + 抖动 + 自定义重试判断** — rc#560 | [ ] |
+| 7 | **F14 `WithRetryPolicy` / `RetryPolicyWrapper`**：指数退避（`InitialDelay`、`Multiplier`、`MaxDelay`）、抖动 `Jitter`、`RetryIf`；`WithRetry` 保持不变 — rc#560 | [x] |
 | 8 | **F15 并发限制**：`WithMaxConcurrentJobs`、`WithTagConcurrencyLimit`（超限排队等待），`NoOverlap` EntryOption（跳过并上报 `JobSkipped`）— rc#430、rc#285 | [x] |
 | 9 | **F17 Entry tags**：`WithTags`、`EntriesByTag` / `RemoveByTag` / `EnableByTag` / `DisableByTag` / `SetTags` — rc#307 | [x] |
 | 10 | **F20 `Metrics` 接口（`WithMetrics`：开始/延迟、完成/耗时、跳过）+ `JobRun.ScheduledAt` / `Triggered`** — rc#357 | [x] |

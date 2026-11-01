@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
   They can be listed with other items, eg: `0 0 1,15,L * *`. Specs using them were rejected before.
 - **Day of week `7` is Sunday**, as in Vixie cron (`5-7` is Friday to Sunday).
+- **Retries with exponential backoff**: `WithRetryPolicy(policy, job)` / `RetryPolicyWrapper(policy)` with
+  `RetryPolicy` (`MaxRetries`, `InitialDelay`, `MaxDelay`, `Multiplier`, `Jitter`, `RetryIf`). The retries
+  are logged in the logs of the job run.
 - **Concurrency limits**: `Builder.WithMaxConcurrentJobs(n)` and `Builder.WithTagConcurrencyLimit(tag, n)`
   (runs over a limit wait for a slot; a run cancelled while waiting completes with the context error,
   without starting), and the `NoOverlap` entry option (`Entry.NoOverlap`), skipping the activations
